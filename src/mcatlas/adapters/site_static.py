@@ -1,0 +1,81 @@
+"""Static catalog site: plain HTML/CSS/JS plus the catalog as a script file.
+
+The catalog is embedded as `data/catalog.js` (not fetched as JSON), so the site also works when
+opened straight from disk via file://. Per-world chunk maps go to `data/maps/<id>.js`, which the
+page loads on demand with a script tag (that works from file:// as well). All texts (signs,
+books, names) go to `data/texts.js`, loaded after the page so that search can use them.
+"""
+
+import json
+from collections.abc import Mapping
+from importlib import resources
+from pathlib import Path
+from typing import Final
+
+from mcatlas.adapters.outputs import atomic_write
+from mcatlas.core.annotations import Annotation
+from mcatlas.core.catalog import Catalog
+from mcatlas.core.model import WorldId
+
+_ASSETS: Final = ("index.html", "style.css", "app.js")
+
+
+def _write(path: Path, data: bytes) -> None:
+    atomic_write(path, data)
+
+
+def _script(assignment: str, payload: str) -> bytes:
+    # "</" must not appear inside a <script>-loaded file that could be inlined later.
+    body = payload.replace("</", "<\\/")
+    return (
+        f"window.MCATLAS_MAPS = window.MCATLAS_MAPS || {{}};\nwindow.{assignment}{body};\n".encode()
+    )
+
+
+class StaticSiteWriter:
+    def __init__(self, site_dir: Path) -> None:
+        self._dir = site_dir
+
+    def write(self, catalog: Catalog, icons: Mapping[WorldId, bytes]) -> str:
+        assets = resources.files("mcatlas.adapters.site_assets")
+        for name in _ASSETS:
+            _write(self._dir / name, assets.joinpath(name).read_bytes())
+        # Notes live in their own file so that saving one note only rewrites that file.
+        payload = catalog.model_dump_json(
+            exclude={
+                "maps": True,
+                "texts": True,
+                "annotations": True,
+                "worlds": {"__all__": {"annotation"}},
+            }
+        )
+        _write(self._dir / "data" / "catalog.js", _script("MCATLAS_CATALOG = ", payload))
+        for world_id, build_map in catalog.maps.items():
+            key = json.dumps(world_id)
+            _write(
+                self._dir / "data" / "maps" / f"{world_id}.js",
+                _script(f"MCATLAS_MAPS[{key}] = ", build_map.model_dump_json()),
+            )
+        for world in catalog.worlds:
+            icon = icons.get(world.world_id)
+            if icon is not None:
+                _write(self._dir / "icons" / f"{world.world_id}.png", icon)
+        texts = {
+            world_id: [
+                [t.kind, t.text, t.holder, t.dimension, t.x, t.y, t.z, int(t.history)]
+                for t in entries
+            ]
+            for world_id, entries in catalog.texts.items()
+        }
+        _write(
+            self._dir / "data" / "texts.js",
+            _script("MCATLAS_TEXTS = ", json.dumps(texts, ensure_ascii=False)),
+        )
+        self.write_annotations(catalog.annotations)
+        return str(self._dir / "index.html")
+
+    def write_annotations(self, annotations: Mapping[WorldId, Annotation]) -> None:
+        payload = json.dumps(
+            {w: a.model_dump(mode="json") for w, a in annotations.items()}, ensure_ascii=False
+        )
+        _write(self._dir / "data" / "annotations.js", _script("MCATLAS_ANNOTATIONS = ", payload))

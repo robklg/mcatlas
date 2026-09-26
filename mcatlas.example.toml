@@ -1,0 +1,36 @@
+# mcatlas configuration example.
+# Copy to ~/.config/mcatlas/config.toml (or ./mcatlas.toml) and adjust.
+# Every value can also be set via the environment, e.g. MCATLAS_ANALYSIS__JOBS=4.
+
+# One or more world sources. mcatlas only ever READS below these paths;
+# mount them however you like (read-only mounts are welcome but not required).
+[[sources]]
+id = "archive"
+path = "/Volumes/share/Archive/Minecraft_worlds"
+archives = ["*.zip"]        # worlds inside zip files are read in place, never extracted
+exclude = []                # glob patterns of top-level folders to skip
+
+[paths]
+# Local, small: the SQLite analysis cache and source manifests.
+# Keep it off network shares (SQLite over SMB is unsafe).
+state_dir = "~/.local/state/mcatlas"
+# The generated catalog website (can live on a share).
+site_dir = "/Volumes/home/mcatlas/site"
+# Reserved for later milestones:
+# cache_dir = "/Volumes/home/mcatlas/cache"
+# render_dir = "/Volumes/home/mcatlas/bluemap"
+# atlas_dir = "/Volumes/share/Archive/Minecraft_worlds_atlas"
+# annotations_dir = "/Volumes/share/Archive/Minecraft_worlds_atlas/annotations"
+
+[players]
+# usercache.json files map player UUIDs to names (read-only).
+usercache = ["~/Library/Application Support/minecraft/usercache.json"]
+
+[players.names]
+# Explicit names win over usercache entries.
+# "0b0e0b0e-0000-4000-8000-000000000003" = "Noor"
+
+[analysis]
+timezone = "Europe/Amsterdam"   # turns timestamps into calendar days
+jobs = 8                        # worlds analyzed in parallel
+# processes = 8                 # tier 2 chunk decoding; default: all CPU cores

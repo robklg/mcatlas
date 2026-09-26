@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Werelden-atlas</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title">
+      <h1>Werelden-atlas</h1>
+      <p class="subtitle" id="summary">Laden…</p>
+    </div>
+    <button type="button" class="ghost" id="theme-toggle" aria-label="Wissel licht/donker thema">◐</button>
+  </header>
+
+  <section class="controls" aria-label="Zoeken en filteren">
+    <input type="search" id="q" placeholder="Zoek op naam, map, speler of blok…" autocomplete="off">
+    <label>Sorteer
+      <select id="sort">
+        <option value="importance">Meest aan gewerkt</option>
+        <option value="last">Laatst actief</option>
+        <option value="first">Eerst actief</option>
+        <option value="days">Actieve dagen</option>
+        <option value="sessions">Sessies</option>
+        <option value="hidden">Mogelijk meer dagen</option>
+        <option value="span">Periode</option>
+        <option value="play">Speeltijd</option>
+        <option value="used">Items gebruikt</option>
+        <option value="size">Grootte</option>
+        <option value="chunks">Chunks</option>
+        <option value="built">Meest gebouwd</option>
+        <option value="below">Meest onder de grond</option>
+        <option value="name">Naam</option>
+      </select>
+    </label>
+    <label>Versie <select id="f-version"><option value="">Alle</option></select></label>
+    <label>Spelmodus <select id="f-mode"><option value="">Alle</option></select></label>
+    <label>Speler <select id="f-player"><option value="">Iedereen</option></select></label>
+    <label>Type <select id="f-generator"><option value="">Alle</option></select></label>
+    <label>Bouw <select id="f-underground">
+      <option value="">Alles</option>
+      <option value="mostly">Vooral onder de grond (≥ 50%)</option>
+      <option value="some">Deels onder de grond (≥ 20%)</option>
+      <option value="little">Bijna alles boven de grond (&lt; 10%)</option>
+    </select></label>
+    <label class="check"><input type="checkbox" id="f-copies"> Verberg kopieën</label>
+    <label class="check"><input type="checkbox" id="f-noted"> Alleen met notitie</label>
+    <label class="check" title="Werelden met activiteit van vóór onze spelers, zoals gedownloade maps"><input type="checkbox" id="f-downloaded"> Verberg gedownloade maps</label>
+    <div class="view-toggle" role="group" aria-label="Weergave">
+      <button type="button" data-view="cards" class="active">Kaarten</button>
+      <button type="button" data-view="table">Tabel</button>
+    </div>
+  </section>
+
+  <main id="list" aria-live="polite"></main>
+
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="detail-inner" id="detail-body"></div>
+  </dialog>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <script src="data/catalog.js"></script>
+  <script src="data/annotations.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

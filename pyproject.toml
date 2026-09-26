@@ -1,0 +1,96 @@
+[project]
+name = "mcatlas"
+version = "0.1.0"
+description = "Read-only catalog and explorer for an archive of Minecraft Java worlds"
+readme = "README.md"
+authors = [
+    { name = "Robby klein Gunnewiek", email = "rob.kleingunnewiek@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "numpy>=2.5.3",
+    "pillow>=12.3.0",
+    "platformdirs>=4.11.15",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "rich>=15.0.0",
+    "typer>=0.27.2",
+    "xxhash>=4.0.1",
+]
+
+[project.scripts]
+mcatlas = "mcatlas.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.1",
+    "hypothesis>=6.168.1",
+    "import-linter>=2.15",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+    "typeguard>=4.6.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--typeguard-packages=mcatlas", "-ra", "--strict-markers"]
+markers = [
+    "archive: runs against the real world archive (opt-in via MCATLAS_ARCHIVE)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "PTH", "PL",
+    "ANN", "TC", "PGH", "RUF", "S", "BLE", "FBT", "PERF", "TRY",
+]
+ignore = [
+    "PLR2004",  # magic values are unavoidable when decoding binary formats
+    "PLR0913",  # dataclass-like constructors
+    "TRY003",   # descriptive exception messages are fine
+    "TC001", "TC002", "TC003",  # pydantic and typer evaluate annotations at runtime
+    "RUF001", "RUF002",  # typographic characters (×, –) in Dutch UI strings are intended
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S", "PLR", "FBT", "PTH", "PLC0415"]
+# core must stay free of filesystem access, so pathlib suggestions do not apply there
+"src/mcatlas/core/**" = ["PTH"]
+# adapters use os-level calls on purpose (O_RDONLY|O_NOFOLLOW, pread, scandir)
+"src/mcatlas/adapters/**" = ["PTH"]
+# typer declares boolean flags as keyword options
+"src/mcatlas/cli.py" = ["FBT", "PLR0917"]  # typer commands take one parameter per option
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+reportAny = "error"
+reportExplicitAny = "error"
+reportUnusedCallResult = "none"
+reportImplicitOverride = "error"
+reportMissingTypeStubs = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportAny = "none"
+reportExplicitAny = "none"
+reportPrivateUsage = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportMissingParameterType = "none"
+reportUnknownParameterType = "none"
+reportUnknownLambdaType = "none"
+# Tests poke at decoded NBT unions and use a loosely typed fixture builder.
+reportAttributeAccessIssue = "none"
+reportMissingTypeArgument = "none"
+reportMatchNotExhaustive = "none"

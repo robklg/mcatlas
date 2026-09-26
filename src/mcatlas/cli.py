@@ -1,0 +1,528 @@
+"""Command-line interface and composition root: the only place adapters are wired to the app."""
+
+import shutil
+import sys
+import webbrowser
+from collections.abc import Mapping
+from contextlib import nullcontext
+from contextvars import ContextVar
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from pydantic import ValidationError
+from rich.console import Console
+from rich.table import Table
+
+from mcatlas.adapters import guard, manifest
+from mcatlas.adapters.annotations_md import AnnotationStoreError, MarkdownAnnotations
+from mcatlas.adapters.serve import serve as make_server
+from mcatlas.adapters.site_static import StaticSiteWriter
+from mcatlas.adapters.source_folder import FolderSource
+from mcatlas.adapters.store_sqlite import SqliteFactStore
+from mcatlas.adapters.usercache import load_names
+from mcatlas.adapters.workers import process_mapper
+from mcatlas.app.analyze import AnalyzeOptions, analyze_sources
+from mcatlas.app.annotations import NoteChange, change_from_form, find_world, save_note
+from mcatlas.app.catalog import load_catalog, publish_site
+from mcatlas.config import ConfigError, Settings, load_settings
+from mcatlas.core.catalog import Catalog, WorldEntry
+from mcatlas.core.discovery import classify
+from mcatlas.core.facts import TextEntry
+from mcatlas.core.model import WorldId, serial_map
+
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help="Read-only catalog and explorer for an archive of Minecraft Java worlds.",
+)
+console = Console()
+SEARCH_TEXTS_SHOWN = 8
+err = Console(stderr=True)
+
+ConfigOpt = Annotated[
+    Path | None,
+    typer.Option(
+        "--config",
+        "-c",
+        help="Config file (default: $MCATLAS_CONFIG, ./mcatlas.toml, "
+        "~/.config/mcatlas/config.toml)",
+    ),
+]
+
+
+_config_file: ContextVar[Path | None] = ContextVar("mcatlas_cli_config", default=None)
+
+
+def _settings() -> Settings:
+    try:
+        settings, _ = load_settings(_config_file.get())
+    except (ConfigError, ValidationError) as e:
+        err.print(f"[red]Configuration error:[/red] {e}")
+        err.print("Start from mcatlas.example.toml and pass it with --config.")
+        raise typer.Exit(2) from e
+    # From here on, nothing in this process may modify the world sources.
+    guard.protect(s.path for s in settings.sources)
+    return settings
+
+
+def _sources(settings: Settings) -> list[FolderSource]:
+    return [
+        FolderSource(
+            s.id,
+            s.path,
+            archives=s.archives,
+            exclude=s.exclude,
+            jobs=settings.analysis.jobs,
+            io_threads=settings.analysis.io_threads,
+        )
+        for s in settings.sources
+    ]
+
+
+def _store(settings: Settings) -> SqliteFactStore:
+    return SqliteFactStore(settings.paths.state_dir / "mcatlas.sqlite")
+
+
+def _names(settings: Settings) -> dict[str, str]:
+    names = load_names(settings.players.usercache)
+    names.update({k.lower(): v for k, v in settings.players.names.items()})
+    return names
+
+
+def _manifest_dir(settings: Settings) -> Path:
+    return settings.paths.state_dir / "manifests"
+
+
+def _size(n: int) -> str:
+    value = float(n)
+    for unit in ("B", "kB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
+
+
+@app.callback()
+def main_callback(config: ConfigOpt = None) -> None:
+    _config_file.set(config)
+
+
+@app.command()
+def doctor() -> None:
+    """Check configuration, paths and prerequisites."""
+    settings = _settings()
+    ok = True
+    table = Table("check", "status", "detail", show_header=False, box=None)
+    for s in settings.sources:
+        readable = s.path.is_dir()
+        ok &= readable
+        table.add_row(
+            f"source {s.id}", "[green]ok[/]" if readable else "[red]missing[/]", str(s.path)
+        )
+    table.add_row("outputs vs sources", "[green]ok[/]", "no overlap (validated)")
+    for name, path in settings.paths.outputs().items():
+        parent = next((p for p in [path, *path.parents] if p.exists()), None)
+        table.add_row(f"paths.{name}", "[green]ok[/]" if parent else "[yellow]?[/]", str(path))
+    state_free = shutil.disk_usage(
+        next(p for p in [settings.paths.state_dir, *settings.paths.state_dir.parents] if p.exists())
+    ).free
+    table.add_row(
+        "free space (state)",
+        "[green]ok[/]" if state_free > 200e6 else "[yellow]low[/]",
+        _size(state_free),
+    )
+    names = _names(settings)
+    table.add_row("known player names", "[green]ok[/]", str(len(names)))
+    for s in settings.sources:
+        latest = manifest.latest(_manifest_dir(settings), s.id)
+        table.add_row(
+            f"manifest {s.id}",
+            "[green]ok[/]" if latest else "[yellow]none[/]",
+            latest.name if latest else "run `mcatlas snapshot` before the first analysis",
+        )
+    table.add_row("timezone", "[green]ok[/]", settings.analysis.timezone)
+    console.print(table)
+    if not ok:
+        raise typer.Exit(1)
+
+
+@app.command()
+def snapshot(
+    quick: Annotated[bool, typer.Option(help="Record size+mtime only, no content hashes")] = False,
+) -> None:
+    """Record a manifest of every source (the baseline for `verify`)."""
+    settings = _settings()
+    for s in settings.sources:
+        console.print(
+            f"Snapshot of [bold]{s.id}[/] ({s.path}) {'without' if quick else 'with'} hashes …"
+        )
+
+        def progress(done: int, total: int) -> None:
+            if done % 200 == 0 or done == total:
+                console.print(f"  hashed {done}/{total}", highlight=False)
+
+        m = manifest.take(
+            s.id,
+            s.path,
+            hashed=not quick,
+            jobs=settings.analysis.jobs,
+            io_threads=settings.analysis.io_threads,
+            progress=progress,
+        )
+        path = manifest.save(m, _manifest_dir(settings))
+        info = manifest.summary(m)
+        console.print(f"  {info['files']} files, {_size(info['bytes'])} → {path}")
+
+
+@app.command()
+def verify(
+    full: Annotated[
+        bool, typer.Option(help="Re-hash contents (slow) instead of size+mtime")
+    ] = False,
+) -> None:
+    """Prove that no source changed since the last snapshot."""
+    settings = _settings()
+    clean = True
+    for s in settings.sources:
+        latest = manifest.latest(_manifest_dir(settings), s.id)
+        if latest is None:
+            err.print(f"[yellow]{s.id}: no snapshot yet; run `mcatlas snapshot` first[/]")
+            clean = False
+            continue
+        old = manifest.load(latest)
+        new = manifest.take(
+            s.id,
+            s.path,
+            hashed=full and old.header.hashed,
+            jobs=settings.analysis.jobs,
+            io_threads=settings.analysis.io_threads,
+        )
+        diff = manifest.compare(old, new)
+        if diff.clean:
+            console.print(
+                f"[green]{s.id}: unchanged[/] since {old.header.created_at:%Y-%m-%d %H:%M} "
+                f"({manifest.summary(new)['files']} files{', contents re-hashed' if full else ''})"
+            )
+            continue
+        clean = False
+        console.print(f"[red]{s.id}: CHANGED since {old.header.created_at:%Y-%m-%d %H:%M}[/]")
+        for label, paths in (
+            ("added", diff.added),
+            ("removed", diff.removed),
+            ("changed", diff.changed),
+        ):
+            for p in paths[:50]:
+                console.print(f"  {label}: {p}", highlight=False)
+            if len(paths) > 50:
+                console.print(f"  … and {len(paths) - 50} more {label}")
+    if not clean:
+        raise typer.Exit(1)
+
+
+@app.command()
+def inventory() -> None:
+    """List every world found in the sources, without analyzing them."""
+    settings = _settings()
+    table = Table("folder", "format", "dimensions", "files", "size", "id")
+    count = 0
+    for source in _sources(settings):
+        for listing in source.scan():
+            layout = classify(listing.files)
+            dims = ", ".join(
+                f"{d.key.removeprefix('minecraft:')}({len(d.region_files)})"
+                for d in layout.dimensions
+            )
+            table.add_row(
+                listing.relpath,
+                layout.format.value,
+                dims[:60],
+                str(len(listing.files)),
+                _size(listing.total_size),
+                listing.world_id,
+            )
+            count += 1
+    console.print(table)
+    console.print(f"{count} entries")
+
+
+@app.command()
+def analyze(
+    tier: Annotated[
+        int,
+        typer.Option(
+            min=1, max=2, help="1: metadata and region headers; 2: also every chunk (blocks)"
+        ),
+    ] = 1,
+    world: Annotated[
+        str | None, typer.Option("--world", "-w", help="Glob on folder name/path")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Ignore the cache and re-analyze")] = False,
+    jobs: Annotated[int | None, typer.Option(min=1, max=64)] = None,
+) -> None:
+    """Analyze worlds (incremental: unchanged worlds are skipped)."""
+    settings = _settings()
+    store = _store(settings)
+    try:
+        options = AnalyzeOptions(
+            tier=tier, world_glob=world, force=force, jobs=jobs or settings.analysis.jobs
+        )
+        processes = settings.analysis.processes
+        with (
+            process_mapper(processes)
+            if tier >= 2 and processes > 1
+            else nullcontext(serial_map) as mapper
+        ):
+            report = analyze_sources(
+                _sources(settings),
+                store,
+                options,
+                progress=lambda m: console.print(m, highlight=False),
+                mapper=mapper,
+            )
+    finally:
+        store.close()
+    summary = f"[bold]{report.worlds}[/] worlds: {report.analyzed} analyzed"
+    summary += f", {report.up_to_date} up to date"
+    if report.forgotten:
+        summary += f", {report.forgotten} no longer present"
+    console.print(summary)
+    for folder, analyzer, error in report.failures:
+        console.print(f"  [yellow]{folder}[/] {analyzer}: {error}", highlight=False)
+
+
+@app.command("build-site")
+def build_site(
+    open_browser: Annotated[bool, typer.Option("--open", help="Open the site afterwards")] = False,
+) -> None:
+    """Generate the static catalog site from the analysis results."""
+    settings = _settings()
+    store = _store(settings)
+    try:
+        catalog, location, problems = publish_site(
+            store,
+            StaticSiteWriter(settings.paths.site_dir),
+            _names(settings),
+            settings.analysis.zone(),
+            ignore_file_days=settings.analysis.ignore_file_days,
+            notes=_notes(settings),
+        )
+    finally:
+        store.close()
+    console.print(f"{len(catalog.worlds)} worlds, {len(catalog.annotations)} notes → {location}")
+    _report_note_problems(problems)
+    if open_browser:
+        webbrowser.open(Path(location).as_uri())
+
+
+@app.command()
+def serve(
+    port: Annotated[int, typer.Option(min=1, max=65535)] = 8765,
+    host: Annotated[
+        str, typer.Option(help="Bind address; keep 127.0.0.1 unless you mean it")
+    ] = "127.0.0.1",
+) -> None:
+    """Serve the generated site on http://HOST:PORT; notes can be edited on the site."""
+    settings = _settings()
+    notes = _notes(settings)
+    by_id = {e.world_id: e for e in _load(settings).worlds}
+    site = StaticSiteWriter(settings.paths.site_dir)
+
+    def on_note(world_id: str, payload: Mapping[str, object]) -> Mapping[str, object]:
+        entry = by_id[WorldId(world_id)]
+        annotation, where = save_note(
+            notes, entry, change_from_form(payload), datetime.now().astimezone(), site
+        )
+        console.print(f"note saved: {entry.folder_name} → {where}", highlight=False)
+        return {"annotation": annotation.model_dump(mode="json"), "stored": where}
+
+    can_write = settings.paths.annotations() is not None
+    server = make_server(
+        settings.paths.site_dir, host, port, on_note=on_note if can_write else None
+    )
+    console.print(f"Serving {settings.paths.site_dir} on http://{host}:{port}  (Ctrl-C to stop)")
+    if can_write:
+        console.print(f"Notes are saved in {settings.paths.annotations()}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def _notes(settings: Settings) -> MarkdownAnnotations:
+    return MarkdownAnnotations(settings.paths.annotations())
+
+
+def _report_note_problems(problems: list[str]) -> None:
+    for problem in problems:
+        err.print(f"[yellow]note skipped[/] {problem}", highlight=False)
+
+
+def _load(settings: Settings) -> Catalog:
+    store = _store(settings)
+    try:
+        catalog, problems = load_catalog(
+            store,
+            _names(settings),
+            settings.analysis.zone(),
+            ignore_file_days=settings.analysis.ignore_file_days,
+            notes=_notes(settings),
+        )
+    finally:
+        store.close()
+    _report_note_problems(problems)
+    return catalog
+
+
+def _load_entries(settings: Settings) -> list[WorldEntry]:
+    return _load(settings).worlds
+
+
+def _matches(entry: WorldEntry, text: str) -> bool:
+    needle = text.casefold()
+    hay = [
+        entry.name,
+        entry.folder_name,
+        entry.relpath,
+        entry.world_id,
+        *(p.name or "" for p in entry.players),
+    ]
+    if entry.annotation is not None:
+        hay += [entry.annotation.title, entry.annotation.note, *entry.annotation.tags]
+    return any(needle in h.casefold() for h in hay if h)
+
+
+@app.command()
+def search(text: str) -> None:
+    """Find worlds by (folder) name, path, player name, or text on signs, in books and names."""
+    settings = _settings()
+    catalog = _load(settings)
+    needle = text.casefold()
+    table = Table("score", "name", "folder", "days", "period", "play h")
+    hits: list[tuple[WorldEntry, list[TextEntry]]] = []
+    for e in catalog.worlds:
+        texts = [t for t in catalog.texts.get(e.world_id, []) if needle in t.text.casefold()]
+        if texts:
+            hits.append((e, texts))
+        if _matches(e, text) or texts:
+            a = e.activity
+            period = f"{a.first_day} … {a.last_day}" if a.first_day else "–"
+            table.add_row(
+                f"{e.importance.score:.1f}",
+                e.name,
+                e.folder_name,
+                str(a.distinct_days),
+                period,
+                f"{e.play_hours:.1f}",
+            )
+    console.print(table)
+    for e, texts in hits:
+        console.print(f"[bold]{e.name}[/] ({e.folder_name}): {len(texts)} text(s)", highlight=False)
+        for t in texts[:SEARCH_TEXTS_SHOWN]:
+            where = f"{t.x} {t.y} {t.z}" if t.x is not None else "-"
+            flat = " ".join(t.text.split())
+            console.print(f"  {t.kind:7} {t.holder:14} {where:18} {flat[:100]}", highlight=False)
+        if len(texts) > SEARCH_TEXTS_SHOWN:
+            console.print(f"  … {len(texts) - SEARCH_TEXTS_SHOWN} more", highlight=False)
+
+
+@app.command()
+def show(world: str) -> None:
+    """Show everything known about one world (id, folder name or part of it)."""
+    settings = _settings()
+    matches = [e for e in _load_entries(settings) if _matches(e, world)]
+    exact = [e for e in matches if world in (e.world_id, e.folder_name)]
+    chosen = exact or matches
+    if len(chosen) != 1:
+        err.print(
+            f"{len(chosen)} worlds match {world!r}: "
+            + ", ".join(e.folder_name for e in chosen[:20])
+        )
+        raise typer.Exit(1)
+    console.print_json(chosen[0].model_dump_json(exclude={"activity": {"days"}}))
+
+
+@app.command()
+def note(
+    world: Annotated[str, typer.Argument(help="World id, folder name, name or part of it")],
+    text: Annotated[
+        str | None, typer.Argument(help="Text added as a new paragraph to the note")
+    ] = None,
+    title: Annotated[str | None, typer.Option(help="Short title for the world")] = None,
+    tag: Annotated[list[str] | None, typer.Option("--tag", "-t", help="Add a tag")] = None,
+    untag: Annotated[list[str] | None, typer.Option(help="Remove a tag")] = None,
+    rating: Annotated[int | None, typer.Option(min=1, max=5, help="1 to 5 stars")] = None,
+    replace: Annotated[bool, typer.Option(help="Replace the note text instead of adding")] = False,
+) -> None:
+    """Write a note about a world (stored as Markdown next to the archive).
+
+    Example: mcatlas note "trein statjon" "Sams treinstation, gevonden via de bordjes" -t gevonden
+    """
+    settings = _settings()
+    entries = _load_entries(settings)
+    chosen = find_world(entries, world)
+    if len(chosen) != 1:
+        err.print(
+            f"{len(chosen)} worlds match {world!r}: "
+            + ", ".join(e.folder_name for e in chosen[:20])
+        )
+        raise typer.Exit(1)
+    entry = chosen[0]
+    change = NoteChange(
+        title=title,
+        note=text if replace else None,
+        append=None if replace else text,
+        add_tags=tag or [],
+        remove_tags=untag or [],
+        rating=rating,
+    )
+    try:
+        annotation, where = save_note(
+            _notes(settings),
+            entry,
+            change,
+            datetime.now().astimezone(),
+            StaticSiteWriter(settings.paths.site_dir),
+        )
+    except (AnnotationStoreError, ValueError) as e:
+        err.print(f"[red]{e}[/]")
+        raise typer.Exit(1) from e
+    console.print(f"[bold]{entry.name}[/] ({entry.folder_name}) → {where}", highlight=False)
+    if annotation.title:
+        console.print(f"  titel: {annotation.title}", highlight=False)
+    if annotation.tags:
+        console.print(f"  tags:  {', '.join(annotation.tags)}", highlight=False)
+    if annotation.note:
+        console.print(annotation.note, highlight=False)
+
+
+@app.command()
+def notes() -> None:
+    """List all notes."""
+    settings = _settings()
+    catalog = _load(settings)
+    names = {e.world_id: e for e in catalog.worlds}
+    table = Table("world", "title", "tags", "rating", "updated", "note")
+    for a in sorted(catalog.annotations.values(), key=lambda a: a.updated or datetime.min):
+        entry = names.get(a.world)
+        world = entry.name if entry else f"{a.folder or a.world} (not in archive)"
+        first = a.note.splitlines()[0] if a.note else ""
+        table.add_row(
+            world,
+            a.title,
+            ", ".join(a.tags),
+            "★" * (a.rating or 0),
+            a.updated.strftime("%Y-%m-%d") if a.updated else "",
+            first[:60],
+        )
+    console.print(table)
+    console.print(f"{len(catalog.annotations)} notes in {settings.paths.annotations()}")
+
+
+def main() -> None:
+    if sys.platform == "win32":  # pragma: no cover
+        err.print("mcatlas is developed for macOS/Linux; Windows is untested.")
+    app()

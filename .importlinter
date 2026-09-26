@@ -1,0 +1,50 @@
+[importlinter]
+root_package = mcatlas
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Hexagonal layers: cli > config > (app | adapters) > ports > core
+type = layers
+layers =
+    mcatlas.cli
+    mcatlas.config
+    mcatlas.app | mcatlas.adapters
+    mcatlas.ports
+    mcatlas.core
+
+[importlinter:contract:core-pure]
+name = core has no I/O: no filesystem, database, network or process access
+type = forbidden
+source_modules =
+    mcatlas.core
+forbidden_modules =
+    os
+    pathlib
+    shutil
+    io
+    sqlite3
+    subprocess
+    socket
+    http
+    urllib
+    tempfile
+    glob
+    fnmatch
+    rich
+    typer
+allow_indirect_imports = True
+
+[importlinter:contract:app-no-io]
+name = app talks to the outside world only through ports
+type = forbidden
+source_modules =
+    mcatlas.app
+forbidden_modules =
+    os
+    pathlib
+    shutil
+    sqlite3
+    subprocess
+    socket
+    http
+allow_indirect_imports = True

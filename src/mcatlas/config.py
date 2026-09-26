@@ -1,0 +1,189 @@
+"""Configuration: TOML file + MCATLAS_* environment variables + CLI overrides.
+
+Precedence (highest first): CLI overrides, environment, config file. No data location has a
+default in code: every path comes from configuration.
+
+Config file lookup: `--config`, then $MCATLAS_CONFIG, then ./mcatlas.toml, then
+~/.config/mcatlas/config.toml.
+"""
+
+import os
+import sys
+from contextvars import ContextVar
+from datetime import date
+from pathlib import Path
+from typing import Self, override
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
+
+_CONFIG_FILE: ContextVar[Path | None] = ContextVar("mcatlas_config_file", default=None)
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def _expand(path: Path) -> Path:
+    return Path(os.path.expandvars(str(path))).expanduser()
+
+
+class SourceSettings(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    path: Path
+    archives: list[str] = Field(default_factory=lambda: ["*.zip"])
+    exclude: list[str] = Field(default_factory=list[str])
+
+    @field_validator("path")
+    @classmethod
+    def _expand_path(cls, v: Path) -> Path:
+        return _expand(v)
+
+
+class PathSettings(BaseModel):
+    state_dir: Path
+    """Local: SQLite cache and manifests. Keep it off network shares (SQLite + SMB is unsafe)."""
+    site_dir: Path
+    cache_dir: Path | None = None
+    render_dir: Path | None = None
+    atlas_dir: Path | None = None
+    annotations_dir: Path | None = None
+
+    @field_validator("*")
+    @classmethod
+    def _expand_paths(cls, v: Path | None) -> Path | None:
+        return _expand(v) if v is not None else None
+
+    def annotations(self) -> Path | None:
+        """Where notes live: annotations_dir, else <atlas_dir>/annotations."""
+        if self.annotations_dir is not None:
+            return self.annotations_dir
+        return self.atlas_dir / "annotations" if self.atlas_dir is not None else None
+
+    def outputs(self) -> dict[str, Path]:
+        candidates = {
+            "state_dir": self.state_dir,
+            "site_dir": self.site_dir,
+            "cache_dir": self.cache_dir,
+            "render_dir": self.render_dir,
+            "atlas_dir": self.atlas_dir,
+            "annotations_dir": self.annotations_dir,
+        }
+        return {name: path for name, path in candidates.items() if path is not None}
+
+
+class PlayerSettings(BaseModel):
+    names: dict[str, str] = Field(default_factory=dict[str, str])
+    """UUID -> display name; wins over names found in usercache files."""
+    usercache: list[Path] = Field(default_factory=list[Path])
+
+    @field_validator("usercache")
+    @classmethod
+    def _expand_paths(cls, v: list[Path]) -> list[Path]:
+        return [_expand(p) for p in v]
+
+
+class AnalysisSettings(BaseModel):
+    timezone: str = "UTC"
+    """IANA zone used to turn timestamps into calendar days."""
+    jobs: int = Field(default=8, ge=1, le=64)
+    """Worlds analyzed in parallel."""
+    processes: int = Field(default_factory=lambda: os.cpu_count() or 1, ge=1, le=256)
+    """Worker processes for chunk decoding (tier 2); 1 = in-process."""
+    io_threads: int = Field(default=32, ge=1, le=256)
+    """Concurrent small reads/stats; hides network-share latency (measured ~20x on SMB)."""
+    ignore_file_days: list[date] = Field(default_factory=list[date])
+    """Extra days whose file mtimes are not play evidence (copy/backup days). Days on which
+    many worlds changed only mtimes are detected automatically as well."""
+
+    @field_validator("timezone")
+    @classmethod
+    def _valid_zone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except ZoneInfoNotFoundError as e:
+            raise ValueError(f"unknown timezone {v!r}") from e
+        return v
+
+    def zone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
+
+
+def _key(path: Path) -> str:
+    real = os.path.realpath(path)
+    return real.casefold() if sys.platform in {"darwin", "win32"} else real
+
+
+def _overlap(a: Path, b: Path) -> bool:
+    ka, kb = _key(a), _key(b)
+    return ka == kb or ka.startswith(kb + os.sep) or kb.startswith(ka + os.sep)
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="MCATLAS_", env_nested_delimiter="__", extra="forbid"
+    )
+
+    sources: list[SourceSettings] = Field(min_length=1)
+    paths: PathSettings
+    players: PlayerSettings = Field(default_factory=PlayerSettings)
+    analysis: AnalysisSettings = Field(default_factory=AnalysisSettings)
+
+    @model_validator(mode="after")
+    def _no_overlap(self) -> Self:
+        ids = [s.id for s in self.sources]
+        if len(set(ids)) != len(ids):
+            raise ValueError("source ids must be unique")
+        for source in self.sources:
+            for name, out in self.paths.outputs().items():
+                if _overlap(source.path, out):
+                    raise ValueError(
+                        f"paths.{name} ({out}) overlaps source {source.id!r} ({source.path}); "
+                        "outputs must live outside the world archive"
+                    )
+        return self
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        config_file = _CONFIG_FILE.get()
+        sources: list[PydanticBaseSettingsSource] = [init_settings, env_settings]
+        if config_file is not None:
+            sources.append(TomlConfigSettingsSource(settings_cls, toml_file=config_file))
+        return tuple(sources)
+
+
+def find_config_file(explicit: Path | None) -> Path | None:
+    """An explicitly chosen file (--config or $MCATLAS_CONFIG) must exist: never fall back."""
+    env = os.environ.get("MCATLAS_CONFIG")
+    chosen = explicit or (Path(env) if env else None)
+    if chosen is not None:
+        if not chosen.expanduser().is_file():
+            raise ConfigError(f"config file not found: {chosen}")
+        return chosen.expanduser()
+    for candidate in (Path("mcatlas.toml"), Path("~/.config/mcatlas/config.toml").expanduser()):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def load_settings(config_file: Path | None = None) -> tuple[Settings, Path | None]:
+    path = find_config_file(config_file)
+    token = _CONFIG_FILE.set(path)
+    try:
+        return Settings(), path  # pyright: ignore[reportCallIssue] - fields come from sources
+    finally:
+        _CONFIG_FILE.reset(token)
