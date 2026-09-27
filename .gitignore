@@ -14,3 +14,6 @@ mcatlas.toml
 /site/
 .hypothesis/
 .DS_Store
+
+# Private notes for Claude Code (real names, paths): never commit
+CLAUDE.local.md
