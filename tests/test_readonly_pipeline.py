@@ -9,15 +9,26 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from builders import Byte, PlayerSpec, TypedList, chunk_nbt, make_world, region
+from builders import (
+    FAKE_BLUEMAP,
+    Byte,
+    PlayerSpec,
+    TypedList,
+    chunk_nbt,
+    fake_java,
+    make_world,
+    region,
+)
 
 from mcatlas.adapters import guard, manifest
+from mcatlas.adapters.bluemap import BlueMapRenderer
 from mcatlas.adapters.site_static import StaticSiteWriter
 from mcatlas.adapters.source_folder import FolderSource
 from mcatlas.adapters.store_sqlite import SqliteFactStore
 from mcatlas.adapters.workers import process_mapper
 from mcatlas.app.analyze import AnalyzeOptions, analyze_sources
 from mcatlas.app.catalog import publish_site
+from mcatlas.app.render import RenderOptions, render_worlds
 from mcatlas.core.model import WorldFormat
 
 T0 = 1_676_199_600  # 2023-02-12 11:00 UTC
@@ -171,7 +182,14 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         first = analyze_sources([source], store, AnalyzeOptions(tier=2, jobs=4))
         second = analyze_sources([source], store, AnalyzeOptions(tier=2, jobs=4))
         names = {SAM: "SamCraft2024", ALEX: "AlexCraft2020"}
-        catalog, index, _ = publish_site(store, StaticSiteWriter(out / "site"), names, UTC)
+        catalog, _, _ = publish_site(store, StaticSiteWriter(out / "site"), names, UTC)
+        # 3D maps: BlueMap (here a stand-in) only ever reads copies in its workspace.
+        renderer = BlueMapRenderer(out / "render", java=fake_java(tmp_path), jar=FAKE_BLUEMAP)
+        rendered = render_worlds([source], catalog.worlds, renderer, RenderOptions())
+        again = render_worlds([source], catalog.worlds, renderer, RenderOptions())
+        catalog, index, _ = publish_site(
+            store, StaticSiteWriter(out / "site"), names, UTC, renderer=renderer
+        )
     finally:
         store.close()
 
@@ -179,6 +197,14 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     diff = manifest.compare(before, after)
     assert diff.clean, diff
     assert before.entries == after.entries
+
+    # Rendering copied only what the maps need, and BlueMap saw only those copies.
+    # Five worlds get a map; the empty folder, console and 20w14∞ worlds cannot.
+    assert rendered.rendered == rendered.maps == 5 and len(rendered.skipped) == 3
+    assert again.rendered == 0 and again.copied_files == 0 and again.up_to_date == again.maps
+    seen = (out / "render" / "fake-bluemap.log").read_text().splitlines()
+    assert seen and all(str(out / "render" / "worlds") in line for line in seen)
+    assert not any(str(archive) in line for line in seen)
 
     # Incremental: the second run found everything up to date.
     assert first.analyzed == first.worlds and not first.failures
@@ -232,6 +258,19 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     }
     assert dream.text_counts == {"sign": 1, "name": 1, "book": 1}
     assert "geheime basis" in (out / "site" / "data" / "texts.js").read_text()
+
+    [dream_map] = catalog.renders[dream.world_id]
+    assert dream_map.region_files == ["region/r.0.0.mca"]  # not r.3.0: no site there
+    staged = out / "render" / "worlds" / dream.world_id
+    assert sorted(p.relative_to(staged).as_posix() for p in staged.rglob("*") if p.is_file()) == [
+        "level.dat",
+        "region/r.0.0.mca",
+    ]
+    assert dream_map.areas[0].label == "plek 1" and dream_map.heights == {0: 70}
+    assert (out / "site" / dream_map.images[0]).is_file()
+    doors = by_folder["DOORS"]
+    assert catalog.renders[doors.world_id][0].areas[0].label == "spawn"  # copied from the zip
+    assert by_folder["Demo_World"].world_id not in catalog.renders
 
     copy = by_folder["New World (3)"]
     assert any(r.world_id == dream.world_id and r.similarity > 0.9 for r in copy.related)

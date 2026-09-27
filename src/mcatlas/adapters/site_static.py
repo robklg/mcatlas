@@ -24,6 +24,23 @@ def _write(path: Path, data: bytes) -> None:
     atomic_write(path, data)
 
 
+def _safe_relpath(relpath: str) -> Path:
+    path = Path(relpath)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"not a relative path inside the site: {relpath!r}")
+    return path
+
+
+def _write_if_changed(path: Path, data: bytes) -> None:
+    # Flat maps are large and rarely change; skip rewriting them over a network share.
+    try:
+        if path.stat().st_size == len(data) and path.read_bytes() == data:
+            return
+    except OSError:
+        pass
+    _write(path, data)
+
+
 def _script(assignment: str, payload: str) -> bytes:
     # "</" must not appear inside a <script>-loaded file that could be inlined later.
     body = payload.replace("</", "<\\/")
@@ -36,7 +53,12 @@ class StaticSiteWriter:
     def __init__(self, site_dir: Path) -> None:
         self._dir = site_dir
 
-    def write(self, catalog: Catalog, icons: Mapping[WorldId, bytes]) -> str:
+    def write(
+        self,
+        catalog: Catalog,
+        icons: Mapping[WorldId, bytes],
+        images: Mapping[str, bytes] | None = None,
+    ) -> str:
         assets = resources.files("mcatlas.adapters.site_assets")
         for name in _ASSETS:
             _write(self._dir / name, assets.joinpath(name).read_bytes())
@@ -71,6 +93,8 @@ class StaticSiteWriter:
             self._dir / "data" / "texts.js",
             _script("MCATLAS_TEXTS = ", json.dumps(texts, ensure_ascii=False)),
         )
+        for relpath, data in (images or {}).items():
+            _write_if_changed(self._dir / _safe_relpath(relpath), data)
         self.write_annotations(catalog.annotations)
         return str(self._dir / "index.html")
 

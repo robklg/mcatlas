@@ -30,6 +30,7 @@ from mcatlas.core.facts import (
     TextEntry,
 )
 from mcatlas.core.model import GameMode, Generator, WorldFormat, WorldId
+from mcatlas.core.render import RenderedMap
 from mcatlas.core.scoring import Importance, importance
 from mcatlas.core.texts import clean, worth_keeping
 
@@ -103,6 +104,7 @@ class WorldEntry(Facts):
     datapacks: list[str] = Field(default_factory=list[str])
     seed: int | None = None
     last_played: datetime | None = None
+    spawn: tuple[int, int, int] | None = None
     size_bytes: int = 0
     files: int = 0
     has_icon: bool = False
@@ -151,6 +153,10 @@ class Catalog(Facts):
     """Texts found per world; large, so writers may store them separately."""
     annotations: dict[WorldId, Annotation] = Field(default_factory=dict[WorldId, Annotation])
     """Notes by world, including notes of worlds no longer in the archive."""
+    renders: dict[WorldId, list[RenderedMap]] = Field(
+        default_factory=dict[WorldId, list[RenderedMap]]
+    )
+    """3D maps (BlueMap) by world, with their flat top-down images."""
 
 
 def _player(p: PlayerFacts, host: PlayerState | None, names: Mapping[str, str]) -> PlayerSummary:
@@ -319,6 +325,7 @@ def build_entry(
         datapacks=[d for d in (level.datapacks if level else []) if d not in _BUILTIN_PACKS],
         seed=level.seed if level else None,
         last_played=level.last_played if level else None,
+        spawn=level.spawn if level else None,
         size_bytes=files.total_size if files else stored.total_size,
         files=files.files if files else 0,
         has_icon=stored.has_icon_asset,
@@ -379,6 +386,16 @@ def _related(entries: Sequence[WorldEntry], stored: Sequence[StoredWorld]) -> li
     ]
 
 
+def _renders(
+    renders: Sequence[RenderedMap], present: set[WorldId]
+) -> dict[WorldId, list[RenderedMap]]:
+    by_world: dict[WorldId, list[RenderedMap]] = {}
+    for r in sorted(renders, key=lambda r: r.sorting):
+        if r.world_id in present and r.rendered_at is not None:
+            by_world.setdefault(r.world_id, []).append(r)
+    return by_world
+
+
 def build_catalog(
     stored: Sequence[StoredWorld],
     names: Mapping[str, str],
@@ -387,6 +404,7 @@ def build_catalog(
     *,
     ignore_file_days: frozenset[date] = frozenset(),
     annotations: Mapping[WorldId, Annotation] | None = None,
+    renders: Sequence[RenderedMap] = (),
 ) -> Catalog:
     notes = dict(annotations or {})
     parsed = [_parse(s) for s in stored]
@@ -419,4 +437,5 @@ def build_catalog(
         annotations=notes,
         maps={p.stored.world_id: b[1] for p, b in zip(parsed, builds, strict=True) if b},
         texts={w: t for w, t in texts.items() if t},
+        renders=_renders(renders, {e.world_id for e in entries}),
     )

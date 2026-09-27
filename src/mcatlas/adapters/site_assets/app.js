@@ -22,6 +22,28 @@
     no_level_dat: "Geen level.dat", empty: "Lege map",
   };
 
+  // ---------- 3D maps (BlueMap); the viewer only works through `mcatlas serve` ----------
+  const SERVED = location.protocol.startsWith("http");
+  const rendersOf = (w) => (CATALOG.renders || {})[w.world_id] || [];
+  function firstImage(w) {
+    for (const m of rendersOf(w)) for (const path of Object.values(m.images)) return path;
+    return null;
+  }
+  function view3d(m, i) {
+    const a = m.areas[i];
+    const y = m.heights[i] ?? a.y;
+    const side = Math.max(a.box[2] - a.box[0], a.box[3] - a.box[1]);
+    const distance = Math.round(Math.min(Math.max(side * 1.3, 80), 2000));
+    return `3d/#${m.map_id}:${a.x}:${y}:${a.z}:${distance}:0:0.5:0:0:perspective`;
+  }
+  function siteView(w, k) {
+    for (const m of rendersOf(w)) {
+      const i = m.areas.findIndex((a) => a.site === k);
+      if (i >= 0) return [m, i];
+    }
+    return null;
+  }
+
   // ---------- small DOM helper (text only: never innerHTML with data) ----------
   function h(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -195,6 +217,8 @@
     if (w.has_icon) {
       return h("img", { class: cls || "icon", src: `icons/${w.world_id}.png`, alt: "", loading: "lazy" });
     }
+    const flat = firstImage(w);
+    if (flat) return h("img", { class: `${cls || "icon"} flat`, src: flat, alt: "", loading: "lazy" });
     return h("div", { class: cls || "icon", "aria-hidden": "true" }, (w.name || "?").trim().charAt(0).toUpperCase());
   }
 
@@ -547,6 +571,27 @@
     return notes.length ? h("p", { class: "folder" }, `Niet meegeteld: ${notes.join("; ")}.`) : null;
   }
 
+  function viewsSection(w) {
+    const items = [];
+    for (const m of rendersOf(w)) {
+      for (const [i, path] of Object.entries(m.images)) {
+        const a = m.areas[i];
+        const where = m.dimension === "minecraft:overworld" ? "" : ` · ${dimName(m.dimension)}`;
+        const title = `${a.label.charAt(0).toUpperCase()}${a.label.slice(1)}${where}`;
+        const img = h("img", { src: path, alt: `Bovenaanzicht van ${title.toLowerCase()}`, loading: "lazy" });
+        const link = SERVED ? view3d(m, i) : path;
+        items.push(h("figure", { class: "view" },
+          h("a", { href: link, target: "_blank", rel: "noopener", title: SERVED ? "Open in 3D" : "Open het plaatje" }, img),
+          h("figcaption", null, h("b", null, title), a.detail && a.detail !== "spawn" ? ` · ${a.detail}` : null,
+            SERVED ? [" · ", h("a", { href: link, target: "_blank", rel: "noopener" }, "open in 3D")] : null)));
+      }
+    }
+    if (!items.length) return null;
+    return [h("h3", null, "Bovenaanzicht"), h("div", { class: "views" }, items),
+      h("p", { class: "folder" }, "Platte kaart per bouwplek (1 pixel is 1 blok, noorden is boven), gemaakt met BlueMap. ",
+        SERVED ? "Klik op een kaart om rond te kijken in 3D." : "Rondkijken in 3D kan als je de catalogus opent met mcatlas serve.")];
+  }
+
   function buildSection(w) {
     const b = w.build;
     if (!b) {
@@ -568,10 +613,14 @@
         h("td", { class: "num" }, `${site.min_y} … ${site.max_y}`),
         h("td", { class: "num" }, site.chunks),
         h("td", { class: "num" }, site.hours_nearby ? hours(site.hours_nearby) : "–"),
-        h("td", null, h("code", null, tpCommand(site)), " ", copyButton(tpCommand(site))));
+        h("td", null, h("code", null, tpCommand(site)), " ", copyButton(tpCommand(site))),
+        SERVED ? h("td", null, (() => {
+          const view = siteView(w, k);
+          return view ? h("a", { href: view3d(...view), target: "_blank", rel: "noopener" }, "3D") : "–";
+        })()) : null);
     });
     const sitesTable = b.sites.length ? h("table", { class: "plain sites" },
-      h("thead", null, h("tr", null, ["Bekeken", "Waar", "Blokken", "Onder de grond", "Hoogte (y)", "Chunks", "Tijd in de buurt", "Teleport"]
+      h("thead", null, h("tr", null, ["Bekeken", "Waar", "Blokken", "Onder de grond", "Hoogte (y)", "Chunks", "Tijd in de buurt", "Teleport", ...(SERVED ? ["3D"] : [])]
         .map((c, i) => h("th", { class: i >= 2 && i <= 6 ? "num" : null }, c)))),
       h("tbody", null, siteRows)) : h("p", { class: "folder" }, "Geen bouwplekken gevonden.");
 
@@ -761,6 +810,7 @@
           badges(w)),
         close),
       noteView(w),
+      viewsSection(w),
       h("div", { class: "stats" },
         stat("Actieve dagen", extraDays(w) > 0 ? `${NUM.format(a.distinct_days)}–${NUM.format(w.days_upper)}` : NUM.format(a.distinct_days)),
         stat("Periode", a.span_days ? `${NUM.format(a.span_days)} d` : "–"),

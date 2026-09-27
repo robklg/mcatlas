@@ -7,6 +7,7 @@ import gzip
 import io
 import json
 import struct
+import sys
 import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -347,3 +348,14 @@ def make_world(
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_bytes(content)
     return root
+
+
+def fake_java(directory: Path) -> Path:
+    """A `java` that runs the given "jar" with this Python: for tests/fake_bluemap.py."""
+    script = directory / "fakejava"
+    script.write_text(f'#!/bin/sh\njar="$2"\nshift 2\nexec "{sys.executable}" "$jar" "$@"\n')
+    script.chmod(0o755)
+    return script
+
+
+FAKE_BLUEMAP = Path(__file__).with_name("fake_bluemap.py")

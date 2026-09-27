@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, tzinfo
 
 from mcatlas.app.analyze import ICON
 from mcatlas.core.catalog import Catalog, build_catalog
-from mcatlas.ports import AnnotationStore, FactStore, SiteWriter
+from mcatlas.ports import AnnotationStore, FactStore, Renderer, SiteWriter
 
 
 def load_catalog(
@@ -15,9 +15,11 @@ def load_catalog(
     *,
     ignore_file_days: Iterable[date] = (),
     notes: AnnotationStore | None = None,
+    renderer: Renderer | None = None,
 ) -> tuple[Catalog, list[str]]:
     """The catalog, plus problems found while reading notes."""
     annotations, problems = notes.load() if notes is not None else ({}, [])
+    renders = renderer.rendered() if renderer is not None else []
     catalog = build_catalog(
         store.worlds(),
         names,
@@ -25,6 +27,7 @@ def load_catalog(
         datetime.now(UTC),
         ignore_file_days=frozenset(ignore_file_days),
         annotations=annotations,
+        renders=renders,
     )
     return catalog, problems
 
@@ -37,8 +40,17 @@ def publish_site(
     *,
     ignore_file_days: Iterable[date] = (),
     notes: AnnotationStore | None = None,
+    renderer: Renderer | None = None,
 ) -> tuple[Catalog, str, list[str]]:
     catalog, problems = load_catalog(
-        store, names, tz, ignore_file_days=ignore_file_days, notes=notes
+        store, names, tz, ignore_file_days=ignore_file_days, notes=notes, renderer=renderer
     )
-    return catalog, writer.write(catalog, store.assets(ICON)), problems
+    images: dict[str, bytes] = {}
+    if renderer is not None:
+        for maps in catalog.renders.values():
+            for path in (p for m in maps for p in m.images.values()):
+                try:
+                    images[path] = renderer.image(path)
+                except OSError as e:
+                    problems.append(f"flat map {path}: {e}")
+    return catalog, writer.write(catalog, store.assets(ICON), images), problems

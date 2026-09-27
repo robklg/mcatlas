@@ -115,6 +115,40 @@ class AnalysisSettings(BaseModel):
         return ZoneInfo(self.timezone)
 
 
+class RenderSettings(BaseModel):
+    """3D maps with BlueMap (https://bluemap.bluecolored.de), run as a separate Java program.
+
+    BlueMap only ever sees copies: mcatlas copies the region files around build sites into
+    paths.render_dir first. BlueMap needs textures from a Minecraft client jar: point
+    `client_jar` at the one your launcher already has, or set `accept_download = true` to let
+    BlueMap download it from Mojang (which means accepting the Minecraft EULA).
+    """
+
+    java: Path | None = None
+    """Java 25+ for BlueMap 5.17 and later; default: `java` on PATH."""
+    jar: Path | None = None
+    """The BlueMap CLI jar (bluemap-<version>-cli.jar)."""
+    client_jar: Path | None = None
+    """A Minecraft client jar, e.g. <launcher>/versions/26.3/26.3.jar."""
+    accept_download: bool = False
+    """Let BlueMap download the client jar; you accept Mojang's EULA by setting this."""
+    mc_version: str | None = None
+    """Resource version for BlueMap; default: taken from client_jar, else BlueMap's latest."""
+    threads: int = Field(default=0, ge=-64, le=256)
+    """Render threads; 0 or negative = all cores minus that many."""
+    pad: int = Field(default=32, ge=0, le=512)
+    """Blocks of surroundings rendered around every build site."""
+    spawn_radius: int = Field(default=96, ge=16, le=1024)
+    """Worlds without a build site get this area around their spawn point."""
+    max_side: int = Field(default=2048, ge=64, le=16384)
+    """Largest area rendered per build site, in blocks per side."""
+
+    @field_validator("java", "jar", "client_jar")
+    @classmethod
+    def _expand_paths(cls, v: Path | None) -> Path | None:
+        return _expand(v) if v is not None else None
+
+
 def _key(path: Path) -> str:
     real = os.path.realpath(path)
     return real.casefold() if sys.platform in {"darwin", "win32"} else real
@@ -134,6 +168,7 @@ class Settings(BaseSettings):
     paths: PathSettings
     players: PlayerSettings = Field(default_factory=PlayerSettings)
     analysis: AnalysisSettings = Field(default_factory=AnalysisSettings)
+    render: RenderSettings = Field(default_factory=RenderSettings)
 
     @model_validator(mode="after")
     def _no_overlap(self) -> Self:

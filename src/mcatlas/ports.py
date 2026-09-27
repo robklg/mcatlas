@@ -4,13 +4,14 @@ Driven adapters in `mcatlas.adapters` implement these; `mcatlas.app` depends onl
 The world-source port is deliberately read-only: it has no method that could change a world.
 """
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from typing import Protocol
 
 from mcatlas.core.annotations import Annotation
 from mcatlas.core.catalog import Catalog, StoredWorld
 from mcatlas.core.model import WorldFiles, WorldId, WorldLayout, WorldListing
+from mcatlas.core.render import MapPlan, RenderedMap
 
 
 class WorldSource(Protocol):
@@ -62,8 +63,15 @@ class FactStore(Protocol):
 
 
 class SiteWriter(Protocol):
-    def write(self, catalog: Catalog, icons: Mapping[WorldId, bytes]) -> str:
-        """Write the static catalog site and return where it was written."""
+    def write(
+        self,
+        catalog: Catalog,
+        icons: Mapping[WorldId, bytes],
+        images: Mapping[str, bytes] | None = None,
+    ) -> str:
+        """Write the static catalog site and return where it was written.
+
+        `images` are extra files by relative path (flat maps of 3D renders)."""
         ...
 
     def write_annotations(self, annotations: Mapping[WorldId, Annotation]) -> None:
@@ -80,4 +88,41 @@ class AnnotationStore(Protocol):
 
     def save(self, annotation: Annotation) -> str:
         """Create or replace the annotation of one world; return where it was stored."""
+        ...
+
+
+class Renderer(Protocol):
+    """Renders 3D maps from copies of worlds in its own workspace, never from the sources.
+
+    The application copies ("stages") the files a map needs through the read-only world source;
+    the renderer only ever sees those copies.
+    """
+
+    def staged(self, world_id: WorldId) -> Mapping[str, tuple[int, int]]:
+        """Copies present for a world: relpath -> (size, mtime_ns of the original)."""
+        ...
+
+    def stage(self, world_id: WorldId, relpath: str, data: bytes, mtime_ns: int) -> None: ...
+
+    def unstage(self, world_id: WorldId, keep: Collection[str]) -> int:
+        """Remove a world's copies that are not in `keep`; return how many were removed."""
+        ...
+
+    def rendered(self) -> list[RenderedMap]:
+        """Maps rendered earlier (with the plan they were rendered from)."""
+        ...
+
+    def render(
+        self,
+        plans: Sequence[MapPlan],
+        todo: Collection[str],
+        *,
+        force: bool,
+        progress: Callable[[str], None],
+    ) -> list[RenderedMap]:
+        """Configure all `plans` (so the viewer lists them) and render the maps in `todo`."""
+        ...
+
+    def image(self, path: str) -> bytes:
+        """A flat map image by the relative path given in `RenderedMap.images`."""
         ...

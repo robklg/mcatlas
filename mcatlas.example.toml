@@ -16,9 +16,9 @@ exclude = []                # glob patterns of top-level folders to skip
 state_dir = "~/.local/state/mcatlas"
 # The generated catalog website (can live on a share).
 site_dir = "/Volumes/home/mcatlas/site"
-# Reserved for later milestones:
-# cache_dir = "/Volumes/home/mcatlas/cache"
-# render_dir = "/Volumes/home/mcatlas/bluemap"
+# 3D maps: BlueMap's workspace (copies of the region files it renders, tiles, the viewer).
+# render_dir = "/Volumes/home/mcatlas/render"
+# Durable output next to (never inside) the archive; notes go to <atlas_dir>/annotations.
 # atlas_dir = "/Volumes/share/Archive/Minecraft_worlds_atlas"
 # annotations_dir = "/Volumes/share/Archive/Minecraft_worlds_atlas/annotations"
 
@@ -34,3 +34,16 @@ usercache = ["~/Library/Application Support/minecraft/usercache.json"]
 timezone = "Europe/Amsterdam"   # turns timestamps into calendar days
 jobs = 8                        # worlds analyzed in parallel
 # processes = 8                 # tier 2 chunk decoding; default: all CPU cores
+
+[render]
+# BlueMap CLI (https://github.com/BlueMap-Minecraft/BlueMap/releases) and Java 25 to run it.
+# java = "~/Library/Application Support/minecraft/runtime/java-runtime-epsilon/mac-os-arm64/java-runtime-epsilon/jre.bundle/Contents/Home/bin/java"
+# jar = "/Volumes/home/mcatlas/render/bluemap-5.28-cli.jar"
+# Textures: the client jar your launcher already has ...
+# client_jar = "~/Library/Application Support/minecraft/versions/26.3/26.3.jar"
+# ... or let BlueMap download it, which means accepting Mojang's EULA:
+# accept_download = false
+# pad = 32             # blocks of surroundings around each build site
+# spawn_radius = 96    # area around the spawn of worlds without a build site
+# max_side = 2048      # largest area per site, in blocks per side
+# threads = 0          # render threads; 0 = all cores

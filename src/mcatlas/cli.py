@@ -17,6 +17,7 @@ from rich.table import Table
 
 from mcatlas.adapters import guard, manifest
 from mcatlas.adapters.annotations_md import AnnotationStoreError, MarkdownAnnotations
+from mcatlas.adapters.bluemap import BlueMapRenderer, RenderError
 from mcatlas.adapters.serve import serve as make_server
 from mcatlas.adapters.site_static import StaticSiteWriter
 from mcatlas.adapters.source_folder import FolderSource
@@ -26,6 +27,7 @@ from mcatlas.adapters.workers import process_mapper
 from mcatlas.app.analyze import AnalyzeOptions, analyze_sources
 from mcatlas.app.annotations import NoteChange, change_from_form, find_world, save_note
 from mcatlas.app.catalog import load_catalog, publish_site
+from mcatlas.app.render import RenderOptions, render_worlds
 from mcatlas.config import ConfigError, Settings, load_settings
 from mcatlas.core.catalog import Catalog, WorldEntry
 from mcatlas.core.discovery import classify
@@ -95,6 +97,23 @@ def _manifest_dir(settings: Settings) -> Path:
     return settings.paths.state_dir / "manifests"
 
 
+def _renderer(settings: Settings) -> BlueMapRenderer | None:
+    """The 3D renderer, when paths.render_dir is configured."""
+    render_dir = settings.paths.render_dir
+    if render_dir is None:
+        return None
+    r = settings.render
+    return BlueMapRenderer(
+        render_dir,
+        java=r.java,
+        jar=r.jar,
+        client_jar=r.client_jar,
+        accept_download=r.accept_download,
+        mc_version=r.mc_version,
+        threads=r.threads,
+    )
+
+
 def _size(n: int) -> str:
     value = float(n)
     for unit in ("B", "kB", "MB", "GB"):
@@ -143,6 +162,21 @@ def doctor() -> None:
             latest.name if latest else "run `mcatlas snapshot` before the first analysis",
         )
     table.add_row("timezone", "[green]ok[/]", settings.analysis.timezone)
+    if settings.paths.render_dir is not None:
+        r = settings.render
+        java = str(r.java) if r.java else shutil.which("java")
+        for label, value in (("java", java), ("jar", r.jar), ("client_jar", r.client_jar)):
+            present = value is not None and Path(value).is_file()
+            status = "[green]ok[/]" if present else "[yellow]missing[/]"
+            detail = str(value)
+            if label == "client_jar" and value is None:
+                status = "[green]ok[/]" if r.accept_download else "[yellow]none[/]"
+                detail = (
+                    "BlueMap downloads it (EULA accepted)"
+                    if r.accept_download
+                    else "set render.client_jar (or accept_download) before `mcatlas render`"
+                )
+            table.add_row(f"render.{label}", status, detail)
     console.print(table)
     if not ok:
         raise typer.Exit(1)
@@ -307,10 +341,14 @@ def build_site(
             settings.analysis.zone(),
             ignore_file_days=settings.analysis.ignore_file_days,
             notes=_notes(settings),
+            renderer=_renderer(settings),
         )
     finally:
         store.close()
-    console.print(f"{len(catalog.worlds)} worlds, {len(catalog.annotations)} notes → {location}")
+    console.print(
+        f"{len(catalog.worlds)} worlds, {len(catalog.annotations)} notes, "
+        f"{sum(len(m) for m in catalog.renders.values())} 3D maps → {location}"
+    )
     _report_note_problems(problems)
     if open_browser:
         webbrowser.open(Path(location).as_uri())
@@ -338,10 +376,18 @@ def serve(
         return {"annotation": annotation.model_dump(mode="json"), "stored": where}
 
     can_write = settings.paths.annotations() is not None
+    render_dir = settings.paths.render_dir
+    web_3d = render_dir / "web" if render_dir is not None else None
     server = make_server(
-        settings.paths.site_dir, host, port, on_note=on_note if can_write else None
+        settings.paths.site_dir,
+        host,
+        port,
+        on_note=on_note if can_write else None,
+        extra={"3d": web_3d} if web_3d is not None else None,
     )
     console.print(f"Serving {settings.paths.site_dir} on http://{host}:{port}  (Ctrl-C to stop)")
+    if web_3d is not None:
+        console.print(f"3D maps (BlueMap) on http://{host}:{port}/3d/ from {web_3d}")
     if can_write:
         console.print(f"Notes are saved in {settings.paths.annotations()}")
     try:
@@ -350,6 +396,68 @@ def serve(
         pass
     finally:
         server.server_close()
+
+
+@app.command()
+def render(
+    world: Annotated[
+        str | None, typer.Option("--world", "-w", help="Glob on folder name/path")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Render again, also unchanged maps")] = False,
+    check: Annotated[
+        bool, typer.Option(help="Verify afterwards that the archive is unchanged")
+    ] = True,
+) -> None:
+    """Render 3D maps (BlueMap) of the build sites; BlueMap only ever reads copies."""
+    settings = _settings()
+    renderer = _renderer(settings)
+    if renderer is None:
+        err.print("[red]Set paths.render_dir first[/] (a folder outside the archive).")
+        raise typer.Exit(2)
+    catalog = _load(settings)
+    r = settings.render
+    options = RenderOptions(
+        world_glob=world,
+        force=force,
+        pad=r.pad,
+        spawn_radius=r.spawn_radius,
+        max_side=r.max_side,
+    )
+    try:
+        report = render_worlds(
+            _sources(settings),
+            catalog.worlds,
+            renderer,
+            options,
+            progress=lambda m: console.print(m, highlight=False, markup=False, soft_wrap=True),
+        )
+    except RenderError as e:
+        err.print(f"[red]Render failed:[/] {e}", highlight=False)
+        raise typer.Exit(1) from e
+    console.print(
+        f"[bold]{report.maps}[/] maps: {report.rendered} rendered, {report.up_to_date} up to "
+        f"date; copied {report.copied_files} files ({_size(report.copied_bytes)}), "
+        f"{report.images} flat images"
+    )
+    for name, reason in report.skipped:
+        console.print(f"  [dim]{name}: {reason}[/]", highlight=False)
+    if report.rendered:
+        store = _store(settings)
+        try:
+            _, location, _ = publish_site(
+                store,
+                StaticSiteWriter(settings.paths.site_dir),
+                _names(settings),
+                settings.analysis.zone(),
+                ignore_file_days=settings.analysis.ignore_file_days,
+                notes=_notes(settings),
+                renderer=renderer,
+            )
+        finally:
+            store.close()
+        console.print(f"site updated → {location}")
+    if check:
+        verify(full=False)
 
 
 def _notes(settings: Settings) -> MarkdownAnnotations:
@@ -370,6 +478,7 @@ def _load(settings: Settings) -> Catalog:
             settings.analysis.zone(),
             ignore_file_days=settings.analysis.ignore_file_days,
             notes=_notes(settings),
+            renderer=_renderer(settings),
         )
     finally:
         store.close()

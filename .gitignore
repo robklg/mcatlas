@@ -13,3 +13,4 @@ wheels/
 mcatlas.toml
 /site/
 .hypothesis/
+.DS_Store

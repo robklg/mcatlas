@@ -22,6 +22,10 @@ The worlds are irreplaceable, so nothing in mcatlas can modify them:
   `guard.check_output_path`; configuration refuses output paths that overlap a source.
 * **A safety net.** A PEP 578 audit hook blocks any write, delete, rename, chmod, utime or
   SQLite connection under a source path, whatever code attempts it.
+* **External programs only see copies.** BlueMap (for 3D maps) runs as a separate Java
+  process, out of reach of the audit hook, so it never gets a path into the archive: mcatlas
+  copies the few files a map needs through the read-only door into `paths.render_dir` and
+  points BlueMap there.
 * **Proof afterwards.** `mcatlas snapshot` records a manifest (size, mtime, xxh3-128 of every
   file); `mcatlas verify [--full]` shows that nothing was added, removed or changed.
 
@@ -37,12 +41,38 @@ uv run mcatlas snapshot        # baseline manifest (hashes every file once)
 uv run mcatlas analyze         # incremental: unchanged worlds are skipped
 uv run mcatlas analyze --tier 2   # also read every chunk: what was built, where, how deep
 uv run mcatlas build-site      # writes the static site to paths.site_dir
+uv run mcatlas render          # 3D maps of the build sites (BlueMap), then verify
 uv run mcatlas serve           # http://127.0.0.1:8765 (or open index.html directly)
 uv run mcatlas verify          # prove the archive is unchanged
 ```
 
 Other commands: `inventory` (list worlds without analyzing), `search TEXT` (names, players,
 signs, books, notes), `show WORLD`, `note WORLD [TEXT] [--title --tag --rating]`, `notes`.
+
+## 3D maps (BlueMap)
+
+`mcatlas render` shows every build site in 3D with the
+[BlueMap](https://bluemap.bluecolored.de) command-line version:
+
+1. For each world it plans one map per dimension (overworld, Nether, End) with a render mask
+   around the build sites (`render.pad` blocks of surroundings, at most `render.max_side` per
+   side); worlds without a site get the area around their spawn point.
+2. It copies `level.dat` and only the region files those areas overlap into
+   `<render_dir>/worlds/<world id>/`, keeping their modification times. Unchanged copies are not
+   copied again, and maps whose plan and copies did not change are not rendered again.
+3. It writes BlueMap's configuration (metrics off), runs BlueMap on those copies in batches,
+   stitches a flat top-down PNG per site from BlueMap's low-res tiles, reads the ground height
+   at each site from them, and puts a marker on every site.
+4. It refreshes the site (flat maps in the world details, "open in 3D" per site) and runs
+   `verify` (skip with `--no-check`).
+
+The viewer is served by `mcatlas serve` under `/3d/`; it needs a web server, so the 3D links
+only appear when the catalog is opened that way. Requirements, in `[render]`:
+
+* `java`: Java 25 for BlueMap 5.17+ (the Minecraft launcher ships one), `jar`: the BlueMap CLI.
+* Textures from a Minecraft client jar: `client_jar` pointing at the jar your launcher already
+  has, or `accept_download = true` to let BlueMap download it from Mojang. The latter means
+  accepting the [Minecraft EULA](https://www.minecraft.net/eula), so it is off by default.
 
 ## Notes (annotations)
 

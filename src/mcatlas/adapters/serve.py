@@ -27,6 +27,8 @@ NOTES_PREFIX: Final = "/api/notes/"
 class SiteServer(ThreadingHTTPServer):
     on_note: NoteHandler | None = None
     allowed_hosts: frozenset[str] = frozenset()
+    extra: Mapping[str, Path] = {}
+    """More folders to serve read-only, by first path segment (e.g. "3d" -> BlueMap webroot)."""
 
 
 class _Handler(SimpleHTTPRequestHandler):
@@ -49,6 +51,19 @@ class _Handler(SimpleHTTPRequestHandler):
     def _trusted(self) -> bool:
         host = (self.headers.get("Host") or "").lower()
         return host in self._site().allowed_hosts and self.headers.get(API_HEADER) == "1"
+
+    @override
+    def translate_path(self, path: str) -> str:
+        first, _, rest = path.lstrip("/").partition("/")
+        root = self._site().extra.get(first.split("?", 1)[0].split("#", 1)[0])
+        if root is None:
+            return super().translate_path(path)
+        own = self.directory
+        self.directory = str(root)
+        try:
+            return super().translate_path("/" + rest)
+        finally:
+            self.directory = own
 
     @override
     def end_headers(self) -> None:
@@ -99,11 +114,17 @@ class _Handler(SimpleHTTPRequestHandler):
 
 
 def serve(
-    directory: Path, host: str, port: int, *, on_note: NoteHandler | None = None
+    directory: Path,
+    host: str,
+    port: int,
+    *,
+    on_note: NoteHandler | None = None,
+    extra: Mapping[str, Path] | None = None,
 ) -> SiteServer:
     handler = partial(_Handler, directory=str(directory))
     server = SiteServer((host, port), handler)
     server.on_note = on_note
+    server.extra = dict(extra or {})
     names = {host, "localhost", "127.0.0.1"} if host in {"127.0.0.1", "localhost"} else {host}
     server.allowed_hosts = frozenset(f"{n}:{server.server_address[1]}" for n in names)
     return server
