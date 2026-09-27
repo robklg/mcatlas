@@ -876,6 +876,29 @@
       h("p", { class: "folder" }, t("views_note"), SERVED ? t("views_3d") : t("views_serve"))];
   }
 
+  // In-game maps: a mosaic per dimension with every filled map in its place, then loose maps.
+  function mapsSection(w) {
+    const m = w.in_game_maps;
+    if (!m) return null;
+    const base = `ingame/${w.world_id}/`;
+    const figure = (src, title, detail) => h("figure", { class: "view" },
+      h("a", { href: src, target: "_blank", rel: "noopener", title: t("open_image") },
+        h("img", { src, alt: title, loading: "lazy" })),
+      h("figcaption", null, h("b", null, title), detail ? ` · ${detail}` : null));
+    const mosaics = m.mosaics.map((s) => figure(base + s.image, `${t("ingame_all")} · ${dimName(s.dimension)}`,
+      `${t("ingame_placed", { n: s.maps })}, ${t("ingame_px", { n: s.blocks_per_pixel })}`));
+    const loose = m.shown.filter((s) => s.image).map((s) => figure(base + s.image, t("ingame_map", { id: String(s.id) }),
+      [t("ingame_around", { x: String(s.x), z: String(s.z) }),
+        s.dimension === "minecraft:overworld" ? null : dimName(s.dimension),
+        t("ingame_px", { n: 2 ** s.scale }),
+        s.locked ? t("ingame_locked") : null].filter(Boolean).join(" · ")));
+    const newest = loose.length && loose.length < m.filled ? t("ingame_newest", { n: loose.length }) : "";
+    return [h("h3", null, t("ingame_h")),
+      h("p", { class: "folder" }, t("ingame_intro", { n: m.total, f: m.filled }) + newest),
+      mosaics.length ? h("div", { class: "views mosaics" }, mosaics) : null,
+      loose.length ? h("div", { class: "views ingame" }, loose) : null];
+  }
+
   function buildSection(w) {
     const b = w.build;
     if (!b) {
@@ -1096,6 +1119,7 @@
         extraDays(w) > 0 ? t("sessions_upper", { s: w.sessions, d: w.days_upper }) : null),
       historyNote(w),
       buildSection(w),
+      mapsSection(w),
       textSection(w),
       h("h3", null, t("properties_h")),
       kv([

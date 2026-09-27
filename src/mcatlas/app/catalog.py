@@ -3,7 +3,7 @@
 from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime, tzinfo
 
-from mcatlas.app.analyze import ICON
+from mcatlas.app.analyze import ICON, MAP_IMAGES
 from mcatlas.core.catalog import Catalog, build_catalog
 from mcatlas.ports import AnnotationStore, FactStore, Renderer, SiteWriter
 
@@ -46,7 +46,14 @@ def publish_site(
         store, names, tz, ignore_file_days=ignore_file_days, notes=notes, renderer=renderer
     )
     images = flat_images(catalog, renderer, problems)
+    for world_id, maps in store.asset_group(MAP_IMAGES).items():
+        for name, data in maps.items():
+            images[f"{SITE_MAPS}/{world_id}/{name}"] = data
     return catalog, writer.write(catalog, store.assets(ICON), images), problems
+
+
+SITE_MAPS = "ingame"
+"""Site folder of the in-game map images: ingame/<world id>/<image>."""
 
 
 def flat_images(

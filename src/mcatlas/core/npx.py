@@ -26,3 +26,8 @@ def eq(a: NDArray[np.generic], value: int) -> NDArray[np.bool_]:
 
 def ne(a: NDArray[np.generic], value: int) -> NDArray[np.bool_]:
     return cast("NDArray[np.bool_]", np.not_equal(a, value))
+
+
+def shape2(a: NDArray[np.generic]) -> tuple[int, int]:
+    """(rows, columns) of a 2-D array."""
+    return cast("tuple[int, int]", a.shape)

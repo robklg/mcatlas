@@ -18,6 +18,7 @@ from builders import (
     chunk_nbt,
     fake_java,
     make_world,
+    map_dat,
     region,
 )
 
@@ -103,7 +104,10 @@ def _build_archive(root: Path) -> None:
         extra_files={
             "entities/r.0.0.mca": _entities_region(),
             "icon.png": b"\x89PNG fake",
-            "data/map_0.dat": b"x",
+            "data/map_0.dat": map_dat(0, 0, color=5),
+            "data/map_1.dat": map_dat(128, 0, color=50),
+            "data/map_2.dat": map_dat(0, 0),  # never used
+            "data/map_3.dat": b"x",  # damaged
             ".DS_Store": b"finder",
         },
     )
@@ -245,7 +249,12 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert {p.name for p in dream.players} == {"SamCraft2024", "AlexCraft2020"}
     assert dream.play_hours == 12.0
     assert dream.has_icon and (out / "site" / "icons" / f"{dream.world_id}.png").is_file()
-    assert dream.map_items == 1
+    assert dream.map_items == 4
+    maps = dream.in_game_maps
+    assert maps is not None and (maps.total, maps.filled) == (4, 2)
+    assert [m.id for m in maps.shown] == [1, 0] and [m.maps for m in maps.mosaics] == [2]
+    assert any("map_3.dat" in e for e in dream.errors)
+    assert (out / "site" / "ingame" / dream.world_id / "mosaic-overworld.png").is_file()
     days = dream.activity.days
     assert datetime(2023, 1, 5).date() in days  # only known from advancements
     assert dream.activity.first_day == datetime(2023, 1, 5).date()
@@ -298,6 +307,13 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     ).read_bytes()
     assert (world_dir / "icon.png").is_file()
     assert "geheime basis" in (world_dir / "texts.md").read_text()
+    assert sorted(p.name for p in (world_dir / "maps").iterdir()) == [
+        "map_0.png",
+        "map_1.png",
+        "mosaic-overworld.png",
+    ]
+    assert facts["in_game_maps"]["mosaics"][0]["image"] == "maps/mosaic-overworld.png"
+    assert "![Map 1](maps/map_1.png)" in (world_dir / "README.md").read_text()
     assert "Alex en Sam" in (out / "atlas" / "index.html").read_text()
     assert not (out / "atlas" / "annotations").exists()
 

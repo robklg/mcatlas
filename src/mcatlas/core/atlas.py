@@ -11,7 +11,7 @@ are the family's own files, and the pages only quote them.
 """
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Final
@@ -26,6 +26,7 @@ from mcatlas.core.document import (
     Block,
     Code,
     Document,
+    Gallery,
     Heading,
     Image,
     Inline,
@@ -42,7 +43,7 @@ from mcatlas.core.document import (
     to_markdown,
 )
 from mcatlas.core.facts import Facts, TextEntry
-from mcatlas.core.model import Language, WorldFormat, WorldId
+from mcatlas.core.model import OVERWORLD, Language, WorldFormat, WorldId
 from mcatlas.core.render import RenderedMap
 from mcatlas.core.words import WORDS, Words, count, day, hours, num
 
@@ -53,6 +54,8 @@ NOTES_DIR: Final = "annotations"
 """The notes folder next to the export; the export never writes there."""
 TEXTS: Final = "texts"
 """Base name of the texts page of a world (texts.md, texts.html)."""
+MAPS_DIR: Final = "maps"
+"""In-game map images inside a world's folder."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +192,37 @@ class AtlasNote(Facts):
     rating: int | None = None
 
 
+class AtlasMap(Facts):
+    number: int
+    """As in data/map_<number>.dat and on the map item in the game."""
+    dimension: str
+    x: int
+    """Centre in blocks."""
+    z: int
+    scale: int
+    """One pixel is 2^scale blocks."""
+    locked: bool = False
+    filled_pixels: int
+    image: str | None = None
+
+
+class AtlasMosaic(Facts):
+    dimension: str
+    area: list[int]
+    """min_x, min_z, max_x, max_z in blocks."""
+    blocks_per_pixel: int
+    maps: int
+    image: str
+
+
+class AtlasMaps(Facts):
+    total: int
+    filled: int
+    shown: list[AtlasMap] = Field(default_factory=list[AtlasMap])
+    """The newest filled maps without duplicates; the others are only counted."""
+    mosaics: list[AtlasMosaic] = Field(default_factory=list[AtlasMosaic])
+
+
 class AtlasRelated(Facts):
     world_id: str
     folder: str
@@ -231,6 +265,7 @@ class AtlasWorld(Facts):
     play: AtlasPlay
     players: list[AtlasPlayer] = Field(default_factory=list[AtlasPlayer])
     build: AtlasBuild | None = None
+    in_game_maps: AtlasMaps | None = None
     related: list[AtlasRelated] = Field(default_factory=list[AtlasRelated])
 
 
@@ -248,7 +283,47 @@ def image_name(site: int | None) -> str:
     return "spawn.png" if site is None else f"site-{site + 1}.png"
 
 
-def atlas_world(e: WorldEntry, images: Mapping[int | None, str]) -> AtlasWorld:
+def _map_image(name: str | None, present: Collection[str]) -> str | None:
+    return f"{MAPS_DIR}/{name}" if name is not None and name in present else None
+
+
+def _atlas_maps(e: WorldEntry, present: Collection[str]) -> AtlasMaps | None:
+    m = e.in_game_maps
+    if m is None:
+        return None
+    return AtlasMaps(
+        total=m.total,
+        filled=m.filled,
+        shown=[
+            AtlasMap(
+                number=s.id,
+                dimension=s.dimension,
+                x=s.x,
+                z=s.z,
+                scale=s.scale,
+                locked=s.locked,
+                filled_pixels=s.filled,
+                image=_map_image(s.image, present),
+            )
+            for s in m.shown
+        ],
+        mosaics=[
+            AtlasMosaic(
+                dimension=s.dimension,
+                area=list(s.box),
+                blocks_per_pixel=s.blocks_per_pixel,
+                maps=s.maps,
+                image=f"{MAPS_DIR}/{s.image}",
+            )
+            for s in m.mosaics
+            if s.image in present
+        ],
+    )
+
+
+def atlas_world(
+    e: WorldEntry, images: Mapping[int | None, str], map_images: Collection[str] = ()
+) -> AtlasWorld:
     a = e.activity
     b = e.build
     note = e.annotation
@@ -346,6 +421,7 @@ def atlas_world(e: WorldEntry, images: Mapping[int | None, str]) -> AtlasWorld:
         )
         if b is not None
         else None,
+        in_game_maps=_atlas_maps(e, map_images),
         related=[
             AtlasRelated(
                 world_id=r.world_id, folder=r.folder_name, similarity=round(r.similarity, 3)
@@ -629,6 +705,49 @@ def _sites(w: Words, e: WorldEntry, images: Mapping[int | None, str]) -> list[Bl
     return blocks
 
 
+def _in_game_maps(w: Words, e: WorldEntry, present: Collection[str]) -> list[Block]:
+    m = e.in_game_maps
+    if m is None:
+        return []
+    intro = w.maps_intro.format(maps=count(w, m.total, w.maps_count), filled=num(w, m.filled))
+    shown = [s for s in m.shown if s.image in present]
+    if shown and len(shown) < m.filled:
+        intro += w.maps_newest.format(n=num(w, len(shown)))
+    blocks: list[Block] = [Heading(2, w.maps_heading), Paragraph(intro)]
+    for s in m.mosaics:
+        if s.image not in present:
+            continue
+        dimension = _dimension(w, s.dimension)
+        x0, z0, x1, z1 = s.box
+        caption = w.mosaic_caption.format(
+            maps=count(w, s.maps, w.maps_count),
+            dimension=dimension,
+            x0=x0,
+            z0=z0,
+            x1=x1,
+            z1=z1,
+            blocks=count(w, s.blocks_per_pixel, w.blocks),
+        )
+        blocks.append(
+            Image(f"{MAPS_DIR}/{s.image}", w.mosaic_alt.format(dimension=dimension), caption)
+        )
+    if shown:
+        images: list[Image] = []
+        for s in shown:
+            where = "" if s.dimension == OVERWORLD else f" ({_dimension(w, s.dimension)})"
+            caption = w.map_caption.format(
+                id=s.id,
+                x=s.x,
+                z=s.z,
+                dimension=where,
+                blocks=count(w, 1 << s.scale, w.blocks),
+                locked=w.map_locked if s.locked else "",
+            )
+            images.append(Image(f"{MAPS_DIR}/{s.image}", w.map_alt.format(id=s.id), caption))
+        blocks.append(Gallery(images))
+    return blocks
+
+
 def _timeline(w: Words, e: WorldEntry) -> list[Block]:
     def months(days: Sequence[date]) -> list[Text]:
         by_month: dict[tuple[int, int], list[int]] = {}
@@ -705,7 +824,12 @@ def _related(w: Words, e: WorldEntry) -> list[Block]:
 
 
 def world_document(
-    w: Words, e: WorldEntry, images: Mapping[int | None, str], *, has_icon: bool
+    w: Words,
+    e: WorldEntry,
+    images: Mapping[int | None, str],
+    *,
+    has_icon: bool,
+    map_images: Collection[str] = (),
 ) -> Document:
     where: list[Inline] = [w.in_archive, Code(e.relpath)]
     if e.folder_name != e.name:
@@ -728,6 +852,7 @@ def world_document(
         Table(["", ""], [list(r) for r in _play_rows(w, e) + _world_rows(w, e)]),
     ]
     blocks += _sites(w, e, images)
+    blocks += _in_game_maps(w, e, map_images)
     blocks += _players(w, e)
     blocks += _timeline(w, e)
     blocks += _texts_line(w, e)
@@ -807,8 +932,10 @@ def atlas_files(
     generated: date,
     tool: str,
     language: Language = "en",
+    in_game: Mapping[WorldId, Mapping[str, bytes]] | None = None,
 ) -> dict[str, bytes]:
-    """Every file of the atlas by relative path. `images` are flat maps by render path.
+    """Every file of the atlas by relative path. `images` are flat maps by render path,
+    `in_game` the in-game map images per world by name.
 
     File names are the same in every language, so a change of language rewrites the pages
     but leaves no files of the other language behind.
@@ -830,10 +957,13 @@ def atlas_files(
             if path in images
         }
         icon = icons.get(e.world_id)
-        doc = world_document(w, e, paths, has_icon=icon is not None)
+        maps = (in_game or {}).get(e.world_id, {})
+        doc = world_document(w, e, paths, has_icon=icon is not None, map_images=maps.keys())
         files[base + "README.md"] = to_markdown(doc).encode()
         files[base + "index.html"] = to_html(doc, lang=language).encode()
-        files[base + "facts.toml"] = facts_toml(atlas_world(e, paths)).encode()
+        files[base + "facts.toml"] = facts_toml(atlas_world(e, paths, maps.keys())).encode()
+        for name, data in maps.items():
+            files[f"{base}{MAPS_DIR}/{name}"] = data
         if icon is not None:
             files[base + "icon.png"] = icon
         for site, path in paths.items():

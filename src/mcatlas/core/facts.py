@@ -171,3 +171,43 @@ class BlockFacts(Facts):
     texts: list[TextEntry] = Field(default_factory=list[TextEntry])
     """Signs, books, names and commands in chunks, entities and player inventories."""
     errors: list[str] = Field(default_factory=list[str])
+
+
+class ImageFacts(Facts):
+    """Facts that come with images (PNG by name). The images are stored next to the facts, not
+    in their JSON; an analyzer's images replace all its earlier images of the world."""
+
+    images: dict[str, bytes] = Field(default_factory=dict[str, bytes], exclude=True)
+
+
+class InGameMap(Facts):
+    id: int
+    """The number in data/map_<id>.dat, also shown on the map item in the game."""
+    scale: int
+    """0-4: one map pixel is 2^scale blocks."""
+    dimension: str
+    x: int
+    """Centre of the map in blocks."""
+    z: int
+    locked: bool = False
+    filled: int
+    """Pixels with colour, of 128 × 128."""
+    image: str | None = None
+
+
+class MapMosaic(Facts):
+    dimension: str
+    image: str
+    box: tuple[int, int, int, int]
+    """Blocks covered: min_x, min_z, max_x, max_z."""
+    blocks_per_pixel: int
+    maps: int
+
+
+class MapFacts(ImageFacts):
+    total: int = 0
+    filled: int = 0
+    """Maps with at least one coloured pixel (the rest were never used)."""
+    shown: list[InGameMap] = Field(default_factory=list[InGameMap])
+    mosaics: list[MapMosaic] = Field(default_factory=list[MapMosaic])
+    errors: list[str] = Field(default_factory=list[str])

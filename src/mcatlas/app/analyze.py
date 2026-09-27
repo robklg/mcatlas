@@ -7,11 +7,13 @@ from dataclasses import dataclass, field
 
 from mcatlas.core import analyze
 from mcatlas.core.discovery import classify
-from mcatlas.core.facts import Facts
+from mcatlas.core.facts import Facts, ImageFacts
 from mcatlas.core.model import Mapper, WorldLayout, WorldListing, serial_map
 from mcatlas.ports import FactStore, WorldSource
 
 ICON = "icon.png"
+MAP_IMAGES = f"{analyze.MAPS.name}/"
+"""Asset prefix of the in-game map images."""
 
 type Progress = Callable[[str], None]
 
@@ -40,6 +42,8 @@ class _Outcome:
     listing: WorldListing
     results: list[tuple[analyze.Analyzer[Facts], str | None, str | None]]
     icon: bytes | None
+    images: dict[str, dict[str, bytes]]
+    """Images per analyzer that makes them (empty when it failed or did not apply)."""
 
 
 def _quiet(_message: str) -> None:
@@ -65,15 +69,19 @@ def _run(
 ) -> _Outcome:
     results: list[tuple[analyze.Analyzer[Facts], str | None, str | None]] = []
     icon: bytes | None = None
+    images: dict[str, dict[str, bytes]] = {
+        a.name: {} for a in todo if issubclass(a.model, ImageFacts)
+    }
     with source.open(listing) as files:
         for analyzer in todo:
             if not analyzer.applies(layout):
                 results.append((analyzer, None, None))  # not applicable, cached as such
                 continue
             try:
-                results.append(
-                    (analyzer, analyzer.run(files, layout, mapper).model_dump_json(), None)
-                )
+                facts = analyzer.run(files, layout, mapper)
+                results.append((analyzer, facts.model_dump_json(), None))
+                if isinstance(facts, ImageFacts):
+                    images[analyzer.name] = facts.images
             except Exception as e:  # noqa: BLE001 - one broken world must not stop the run
                 results.append((analyzer, None, f"{type(e).__name__}: {e}"))
         if want_icon and layout.icon is not None:
@@ -81,7 +89,7 @@ def _run(
                 icon = files.read_bytes(layout.icon)
             except OSError:
                 icon = None
-    return _Outcome(listing, results, icon)
+    return _Outcome(listing, results, icon, images)
 
 
 def analyze_sources(
@@ -149,6 +157,8 @@ def analyze_sources(
                         report.failures.append((listing.folder_name, analyzer.name, error))
                 if outcome.icon is not None:
                     store.save_asset(listing.world_id, ICON, fingerprint, outcome.icon)
+                for name, images in outcome.images.items():
+                    store.replace_assets(listing.world_id, f"{name}/", fingerprint, images)
                 report.analyzed += 1
                 say(f"[{n}/{len(jobs)}] {listing.folder_name}")
     return report

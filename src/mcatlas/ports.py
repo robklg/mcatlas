@@ -60,6 +60,16 @@ class FactStore(Protocol):
 
     def assets(self, name: str) -> Mapping[WorldId, bytes]: ...
 
+    def replace_assets(
+        self, world_id: WorldId, prefix: str, fingerprint: str, data: Mapping[str, bytes]
+    ) -> None:
+        """Make `data` (names without the prefix) the only assets of the world under `prefix`."""
+        ...
+
+    def asset_group(self, prefix: str) -> Mapping[WorldId, Mapping[str, bytes]]:
+        """All assets under `prefix` by world, named without the prefix."""
+        ...
+
     def worlds(self) -> Sequence[StoredWorld]: ...
 
 

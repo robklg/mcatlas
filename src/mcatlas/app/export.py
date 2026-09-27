@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, tzinfo
 
-from mcatlas.app.analyze import ICON
+from mcatlas.app.analyze import ICON, MAP_IMAGES
 from mcatlas.app.catalog import flat_images, load_catalog
 from mcatlas.core.atlas import AtlasChanges, atlas_files
 from mcatlas.core.model import Language
@@ -44,6 +44,7 @@ def export_atlas(
         generated=today,
         tool=tool,
         language=language,
+        in_game=store.asset_group(MAP_IMAGES),
     )
     return ExportReport(
         worlds=len(catalog.worlds),

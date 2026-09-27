@@ -100,6 +100,15 @@ class Words:
     spawn_caption: str
     top_blocks: str
     top_blocks_header: tuple[str, ...]
+    maps_heading: str
+    maps_count: Plural
+    maps_intro: str
+    maps_newest: str
+    mosaic_alt: str
+    mosaic_caption: str
+    map_alt: str
+    map_caption: str
+    map_locked: str
     players_heading: str
     players_header: tuple[str, ...]
     timeline: str
@@ -295,6 +304,18 @@ NL: Final = Words(
     spawn_caption="Het gebied{around} van bovenaf.",
     top_blocks="Meest gebouwde blokken",
     top_blocks_header=("Blok", "Aantal"),
+    maps_heading="Kaarten in het spel",
+    maps_count=("kaart", "kaarten"),
+    maps_intro="{maps}, waarvan {filled} ingevuld.",
+    maps_newest=" Hieronder de nieuwste {n}, zonder dubbele.",
+    mosaic_alt="Kaarten samen ({dimension})",
+    mosaic_caption=(
+        "{maps} op hun plek ({dimension}, {x0} {z0} tot {x1} {z1}), noorden boven; "
+        "1 pixel is {blocks}."
+    ),
+    map_alt="Kaart {id}",
+    map_caption="Kaart #{id}: rond {x} {z}{dimension}, 1 pixel is {blocks}{locked}.",
+    map_locked=", vergrendeld",
     players_heading="Spelers",
     players_header=(
         "Speler",
@@ -356,7 +377,9 @@ Alles hier bestaat uit gewone bestanden die je zonder mcatlas kunt openen, ook o
     `schema/world.schema.json`),
   - `texts.html` / `texts.md`: bordjes, boeken, namen en commando's uit de wereld,
   - `site-1.png`, `site-2.png`, ...: de bouwplekken van bovenaf (noorden boven, 1 pixel is
-    1 of meer blokken), `icon.png`: het plaatje van de wereld uit het Minecraft-menu.
+    1 of meer blokken), `icon.png`: het plaatje van de wereld uit het Minecraft-menu,
+  - `maps/`: de kaarten die in het spel zijn gemaakt (`map_<nummer>.png`, zoals in het spel)
+    en per dimensie een mozaïek met alle kaarten op hun plek (`mosaic-<dimensie>.png`).
 - **annotations/**: onze eigen notities per wereld (Markdown). mcatlas overschrijft die nooit;
   de pagina's hier citeren ze alleen.
 
@@ -550,6 +573,18 @@ EN: Final = Words(
     spawn_caption="The area{around} from above.",
     top_blocks="Most built blocks",
     top_blocks_header=("Block", "Count"),
+    maps_heading="In-game maps",
+    maps_count=("map", "maps"),
+    maps_intro="{maps}, {filled} of them filled in.",
+    maps_newest=" Below are the newest {n}, without duplicates.",
+    mosaic_alt="Maps together ({dimension})",
+    mosaic_caption=(
+        "{maps} in their places ({dimension}, {x0} {z0} to {x1} {z1}), north up; "
+        "1 pixel is {blocks}."
+    ),
+    map_alt="Map {id}",
+    map_caption="Map #{id}: around {x} {z}{dimension}, 1 pixel is {blocks}{locked}.",
+    map_locked=", locked",
     players_heading="Players",
     players_header=(
         "Player",
@@ -610,7 +645,9 @@ Everything here is plain files you can open without mcatlas, also twenty years f
     `schema/world.schema.json`),
   - `texts.html` / `texts.md`: signs, books, names and commands from the world,
   - `site-1.png`, `site-2.png`, ...: the build sites from above (north up, 1 pixel is 1 or
-    more blocks), `icon.png`: the world's picture from the Minecraft menu.
+    more blocks), `icon.png`: the world's picture from the Minecraft menu,
+  - `maps/`: the maps made in the game (`map_<number>.png`, as in the game) and per
+    dimension a mosaic with all maps in their places (`mosaic-<dimension>.png`).
 - **annotations/**: our own notes per world (Markdown). mcatlas never overwrites them; the
   pages here only quote them.
 

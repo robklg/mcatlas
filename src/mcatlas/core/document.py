@@ -75,6 +75,13 @@ class Image:
 
 
 @dataclass(frozen=True, slots=True)
+class Gallery:
+    """Small images side by side (in-game maps), each with its caption."""
+
+    images: Sequence[Image]
+
+
+@dataclass(frozen=True, slots=True)
 class Pre:
     """Text shown exactly as it is: book pages, long sign texts."""
 
@@ -88,7 +95,7 @@ class Markdown:
     text: str
 
 
-type Block = Heading | Paragraph | Items | Table | Image | Pre | Markdown
+type Block = Heading | Paragraph | Items | Table | Image | Gallery | Pre | Markdown
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +169,12 @@ def _md_block(block: Block) -> str:  # noqa: PLR0911 - one arm per block type
         case Image(src, alt, caption):
             image = f"![{_md_escape(alt)}]({_md_href(src)})"
             return f"{image}\n\n*{_md_escape(caption)}*" if caption else image
+        case Gallery(images):
+            return "\n".join(
+                f"- ![{_md_escape(i.alt)}]({_md_href(i.src)})"
+                + (f" {_md_escape(i.caption)}" if i.caption else "")
+                for i in images
+            )
         case Pre(text):
             fence = "```"
             while fence in text:
@@ -187,6 +200,8 @@ th { background: #f3f3f3; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 img { max-width: 100%; image-rendering: pixelated; border: 1px solid #ddd; }
 figure { margin: 0.5rem 0 1rem; }
+.gallery { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.gallery figure { width: 256px; margin: 0; } .gallery img { width: 256px; }
 figcaption { color: #555; font-size: 0.9rem; }
 pre, .note { white-space: pre-wrap; background: #f6f6f6; padding: 0.6rem; border-radius: 4px; }
 code { background: #f1f1f1; padding: 0 0.2rem; border-radius: 3px; }
@@ -241,6 +256,10 @@ def _html_block(block: Block) -> str:  # noqa: PLR0911 - one arm per block type
             img = f'<img src="{_esc(src)}" alt="{_esc(alt)}" loading="lazy">'
             cap = f"<figcaption>{_esc(caption)}</figcaption>" if caption else ""
             return f"<figure>{img}{cap}</figure>"
+        case Gallery(images):
+            return (
+                '<div class="gallery">\n' + "\n".join(_html_block(i) for i in images) + "\n</div>"
+            )
         case Pre(text):
             return f"<pre>{_esc(text)}</pre>"
         case Markdown(text):

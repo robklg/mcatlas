@@ -147,6 +147,30 @@ class SqliteFactStore:
         rows = self._rows("SELECT world_id, data FROM assets WHERE name = ?", (name,))
         return {WorldId(str(r[0])): cast("bytes", r[1]) for r in rows}
 
+    def replace_assets(
+        self, world_id: WorldId, prefix: str, fingerprint: str, data: Mapping[str, bytes]
+    ) -> None:
+        with self._db:
+            self._db.execute(
+                "DELETE FROM assets WHERE world_id = ? AND substr(name, 1, ?) = ?",
+                (world_id, len(prefix), prefix),
+            )
+            self._db.executemany(
+                "INSERT INTO assets VALUES (?, ?, ?, ?)",
+                [(world_id, prefix + name, fingerprint, blob) for name, blob in data.items()],
+            )
+
+    def asset_group(self, prefix: str) -> Mapping[WorldId, Mapping[str, bytes]]:
+        found: dict[WorldId, dict[str, bytes]] = {}
+        for world_id, name, blob in self._rows(
+            "SELECT world_id, name, data FROM assets WHERE substr(name, 1, ?) = ? ORDER BY name",
+            (len(prefix), prefix),
+        ):
+            found.setdefault(WorldId(str(world_id)), {})[str(name)[len(prefix) :]] = cast(
+                "bytes", blob
+            )
+        return found
+
     def worlds(self) -> Sequence[StoredWorld]:
         facts: dict[str, dict[str, str]] = {}
         errors: dict[str, dict[str, str]] = {}

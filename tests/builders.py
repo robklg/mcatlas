@@ -359,3 +359,25 @@ def fake_java(directory: Path) -> Path:
 
 
 FAKE_BLUEMAP = Path(__file__).with_name("fake_bluemap.py")
+
+
+def map_dat(
+    x: int = 0,
+    z: int = 0,
+    *,
+    color: int = 0,
+    scale: int = 0,
+    dimension: str | int = "minecraft:overworld",
+    locked: bool = False,
+) -> bytes:
+    """An in-game map file (data/map_<n>.dat) filled with one palette index (0 = never used)."""
+    colors = np.full(128 * 128, color, dtype=np.uint8).astype(np.int8)
+    data = {
+        "scale": Byte(scale),
+        "dimension": dimension if isinstance(dimension, str) else Byte(dimension),
+        "xCenter": x,
+        "zCenter": z,
+        "locked": Byte(int(locked)),
+        "colors": colors,
+    }
+    return nbt_gz({"DataVersion": 3465, "data": data})

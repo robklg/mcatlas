@@ -12,6 +12,7 @@ from typing import Generic, TypeVar
 from mcatlas.core.analyze.blocks import analyze_blocks
 from mcatlas.core.analyze.files import analyze_files
 from mcatlas.core.analyze.level import analyze_level
+from mcatlas.core.analyze.maps import analyze_maps
 from mcatlas.core.analyze.players import analyze_players
 from mcatlas.core.analyze.regions import analyze_regions
 from mcatlas.core.data.structure_blocks import VERSION as BLOCK_LISTS_VERSION
@@ -20,6 +21,7 @@ from mcatlas.core.facts import (
     Facts,
     FileFacts,
     LevelFacts,
+    MapFacts,
     PlayersFacts,
     RegionFacts,
 )
@@ -56,6 +58,8 @@ REGIONS = Analyzer(
     "regions", 1, 1, RegionFacts, _simple(analyze_regions), lambda lay: bool(lay.dimensions)
 )
 FILES = Analyzer("files", 1, 1, FileFacts, _simple(analyze_files))
+MAPS = Analyzer("maps", 2, 1, MapFacts, _simple(analyze_maps))
+"""In-game maps; their images are stored as assets named `maps/<image>`."""
 BLOCKS = Analyzer(
     "blocks",
     BLOCK_LISTS_VERSION * 100 + 2,
@@ -66,7 +70,7 @@ BLOCKS = Analyzer(
 )
 """Version combines the block lists' version with the analyzer's own."""
 
-ALL: tuple[Analyzer[Facts], ...] = (LEVEL, PLAYERS, REGIONS, FILES, BLOCKS)
+ALL: tuple[Analyzer[Facts], ...] = (LEVEL, PLAYERS, REGIONS, FILES, MAPS, BLOCKS)
 BY_NAME: dict[str, Analyzer[Facts]] = {a.name: a for a in ALL}
 
 

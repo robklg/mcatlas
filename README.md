@@ -149,6 +149,7 @@ worlds/<world id>/
   facts.toml              machine-readable facts, with `schema_version`
   texts.md, .html         signs, books, names and commands
   site-<n>.png, icon.png  flat maps of the build sites (from `render`), the world icon
+  maps/                   in-game maps: the newest 24, and a mosaic per area with all maps
 annotations/          the notes (see below): never written by the export
 ```
 

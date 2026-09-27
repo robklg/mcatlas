@@ -22,7 +22,10 @@ from mcatlas.core.facts import (
     BlockFacts,
     Facts,
     FileFacts,
+    InGameMap,
     LevelFacts,
+    MapFacts,
+    MapMosaic,
     PlayerFacts,
     PlayersFacts,
     PlayerState,
@@ -84,6 +87,18 @@ class Related(Facts):
     similarity: float
 
 
+class InGameMaps(Facts):
+    """The world's in-game maps; images are named `maps/<image>` in the asset store."""
+
+    total: int = 0
+    filled: int = 0
+    shown: list[InGameMap] = Field(default_factory=list[InGameMap])
+    mosaics: list[MapMosaic] = Field(default_factory=list[MapMosaic])
+
+
+MAX_MAP_ERRORS = 5
+
+
 class WorldEntry(Facts):
     world_id: WorldId
     source_id: str
@@ -109,6 +124,8 @@ class WorldEntry(Facts):
     files: int = 0
     has_icon: bool = False
     map_items: int = 0
+    in_game_maps: InGameMaps | None = None
+    """None when there are none (or they were not analyzed yet)."""
     chunks: int = 0
     dimensions: list[DimensionSummary] = Field(default_factory=list[DimensionSummary])
     players: list[PlayerSummary] = Field(default_factory=list[PlayerSummary])
@@ -184,6 +201,7 @@ class _Parsed:
     regions: RegionFacts | None
     files: FileFacts | None
     blocks: BlockFacts | None
+    maps: MapFacts | None
 
 
 def _parse(stored: StoredWorld) -> _Parsed:
@@ -197,6 +215,7 @@ def _parse(stored: StoredWorld) -> _Parsed:
     regions = parsed.get(analyze.REGIONS.name)
     files = parsed.get(analyze.FILES.name)
     blocks = parsed.get(analyze.BLOCKS.name)
+    maps = parsed.get(analyze.MAPS.name)
     return _Parsed(
         stored=stored,
         level=level if isinstance(level, LevelFacts) else None,
@@ -204,6 +223,7 @@ def _parse(stored: StoredWorld) -> _Parsed:
         regions=regions if isinstance(regions, RegionFacts) else None,
         files=files if isinstance(files, FileFacts) else None,
         blocks=blocks if isinstance(blocks, BlockFacts) else None,
+        maps=maps if isinstance(maps, MapFacts) else None,
     )
 
 
@@ -293,6 +313,11 @@ def build_entry(
     if regions:
         errors += regions.errors
     chunks = sum(d.chunks for d in regions.dimensions) if regions else 0
+    maps = p.maps
+    if maps and maps.errors:
+        errors += maps.errors[:MAX_MAP_ERRORS]
+        if len(maps.errors) > MAX_MAP_ERRORS:
+            errors.append(f"maps: {len(maps.errors) - MAX_MAP_ERRORS} more unreadable map files")
 
     activity = build_profile(
         days,
@@ -330,6 +355,11 @@ def build_entry(
         files=files.files if files else 0,
         has_icon=stored.has_icon_asset,
         map_items=files.map_items if files else 0,
+        in_game_maps=InGameMaps(
+            total=maps.total, filled=maps.filled, shown=maps.shown, mosaics=maps.mosaics
+        )
+        if maps and maps.total
+        else None,
         chunks=chunks,
         dimensions=[
             DimensionSummary(
