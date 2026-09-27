@@ -112,10 +112,12 @@ button, select, input { font: inherit; color: inherit; }
 
 table.worlds { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 table.worlds th, table.worlds td { padding: 6px 8px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: middle; }
-table.worlds th { font-weight: 600; color: var(--ink-2); cursor: pointer; white-space: nowrap; position: sticky; top: 56px; background: var(--surface); }
+table.worlds th { font-weight: 600; color: var(--ink-2); cursor: pointer; white-space: nowrap; position: sticky; top: var(--controls-height, 56px); background: var(--surface); z-index: 1; }
 table.worlds td.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.worlds tr:hover td { background: var(--surface-2); cursor: pointer; }
 table.worlds .strip { height: 20px; min-width: 220px; }
+.zoom-ticks { position: relative; height: 14px; margin-top: 2px; min-width: 220px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.zoom-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 
 dialog {
   width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0;

@@ -218,12 +218,98 @@
             bin.map((d) => DATE.format(new Date(d.t)).replace(/ \d{4}$/, "")).join(", "))
         : h("div", { class: "muted" }, "geen activiteit"),
     );
+    placeTip(ev);
+  }
+  // An open <dialog> sits in the browser's top layer, above any z-index: while it is open the
+  // tooltip has to live inside it to be visible.
+  function placeTip(ev) {
+    const dlg = $("#detail");
+    const host = dlg.open ? dlg : document.body;
+    if (tip.parentNode !== host) host.append(tip);
     tip.hidden = false;
-    const x = Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8);
-    tip.style.left = `${x}px`;
+    tip.style.left = `${Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8)}px`;
     tip.style.top = `${ev.clientY + 14}px`;
   }
   function hideTip() { tip.hidden = true; }
+
+  // ---------- zoomed strip: only the chosen range (table view) ----------
+  const DAY_ZOOM = 124;  // up to about four months, one column per day
+  function zoomAxis() {
+    const from = state.from ?? firstMs;
+    const to = state.to ?? lastMs;
+    const days = Math.round((to - from) / DAY_MS) + 1;
+    if (days <= DAY_ZOOM) return { daily: true, start: from, end: to, count: days };
+    const lo = Math.max(0, Math.floor((from - axisStart) / WEEK_MS));
+    const hi = Math.min(binCount - 1, Math.floor((to - axisStart) / WEEK_MS));
+    return { daily: false, lo, start: axisStart + lo * WEEK_MS, end: to, count: Math.max(1, hi - lo + 1) };
+  }
+  const axisSpan = (ax) => (ax.daily ? ax.count * DAY_MS : ax.count * WEEK_MS);
+  // Month starts (or year starts, for long ranges) inside the axis, as fractions of its width.
+  function axisMarks(ax) {
+    const span = axisSpan(ax);
+    const byYear = span > 900 * DAY_MS;
+    const marks = [];
+    const d = new Date(ax.start);
+    for (let y = d.getUTCFullYear(), m = d.getUTCMonth() + 1; ; m++) {
+      if (m > 11) { m = 0; y++; }
+      const t = Date.UTC(y, m, 1);
+      if (t >= ax.start + span) break;  // a boundary at the very end marks nothing
+      if (byYear && m !== 0) continue;
+      marks.push({ frac: (t - ax.start) / span, label: m === 0 || byYear ? String(y) : MONTH.format(new Date(t)) });
+    }
+    return marks;
+  }
+  function zoomTicks(ax) {
+    const row = h("div", { class: "zoom-ticks" });
+    const marks = axisMarks(ax);
+    const every = Math.ceil(marks.length / 8);  // keep labels from colliding
+    marks.forEach((mk, n) => {
+      if (n % every === 0 && mk.frac < 0.97) row.append(h("span", { style: `left:${(mk.frac * 100).toFixed(2)}%` }, mk.label));
+    });
+    return row;
+  }
+  const SIGNALS = [["chunk_saves", "chunks opgeslagen"], ["advancements", "advancements"], ["file_saves", "bestanden"]];
+  function zoomStrip(w, ax, height) {
+    const W = 1000; const H = height;
+    const bw = W / ax.count; const gap = ax.count > 300 ? 0.5 : 1.5;
+    const svg = s("svg", { class: "strip", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img",
+      "aria-label": `Activiteit in de gekozen periode: ${daysInRange(w)} dagen` });
+    for (const mk of axisMarks(ax)) {
+      svg.append(s("line", { x1: mk.frac * W, x2: mk.frac * W, y1: 0, y2: H, stroke: "var(--grid)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+    }
+    svg.append(s("line", { x1: 0, x2: W, y1: H - 0.5, y2: H - 0.5, stroke: "var(--baseline)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+    const cols = new Array(ax.count).fill(null);
+    for (const d of w._days) {
+      if (!inRange(d.t)) continue;
+      const i = Math.floor((d.t - ax.start) / (ax.daily ? DAY_MS : WEEK_MS));
+      if (i >= 0 && i < ax.count) (cols[i] ||= []).push(d);
+    }
+    cols.forEach((col, i) => {
+      if (!col) return;
+      const hgt = ax.daily ? H - 3 : Math.max(3, ((H - 2) * col.length) / 7);
+      svg.append(s("rect", { x: i * bw + gap / 2, y: H - 1 - hgt, width: Math.max(1, bw - gap), height: hgt, fill: "var(--accent)", rx: 1 }));
+    });
+    svg.addEventListener("mousemove", (ev) => {
+      const box = svg.getBoundingClientRect();
+      const i = Math.min(ax.count - 1, Math.max(0, Math.floor(((ev.clientX - box.left) / box.width) * ax.count)));
+      const col = cols[i];
+      const start = ax.start + i * (ax.daily ? DAY_MS : WEEK_MS);
+      if (ax.daily) {
+        const sig = col ? col[0].sig : null;
+        const evidence = sig ? SIGNALS.filter(([k]) => sig[k]).map(([k, label]) => `${NUM.format(sig[k])} ${label}`) : [];
+        tip.replaceChildren(h("div", null, DATE.format(new Date(start))),
+          sig ? h("div", null, evidence.join(", ") || "laatst gespeeld") : h("div", { class: "muted" }, "geen activiteit"));
+      } else {
+        tip.replaceChildren(h("div", null, `Week van ${DATE.format(new Date(start))}`),
+          col ? h("div", null, `${col.length} actieve ${col.length === 1 ? "dag" : "dagen"}: `,
+            col.map((d) => DATE.format(new Date(d.t)).replace(/ \d{4}$/, "")).join(", "))
+            : h("div", { class: "muted" }, "geen activiteit"));
+      }
+      placeTip(ev);
+    });
+    svg.addEventListener("mouseleave", hideTip);
+    return h("div", { class: "strip-wrap", style: "position:relative" }, svg);
+  }
 
   function icon(w, cls) {
     if (w.has_icon) {
@@ -390,6 +476,7 @@
   }
 
   function table(worlds) {
+    const ax = hasRange() ? zoomAxis() : null;
     const cols = [
       ["Naam", "name"], ["Dagen", "days"], ["Periode", "first"], ["Speeltijd", "play"],
       ["Items", "used"], ["Grootte", "size"], ["Versie", null], ["Activiteit", null],
@@ -397,7 +484,9 @@
     const head = h("tr", null, cols.map(([label, key]) => h("th", {
       onclick: key ? () => { state.sort = key; $("#sort").value = key; render(); } : null,
       "aria-sort": key && state.sort === key ? "descending" : null,
-    }, label)));
+    }, label === "Activiteit" && ax
+      ? [`Activiteit ${ax.daily ? "per dag" : "per week"}`, zoomTicks(ax)]
+      : label)));
     const rows = worlds.map((w) => h("tr", { onclick: () => openDetail(w) },
       h("td", null, w.name, w.name !== w.folder_name ? h("div", { class: "folder" }, w.folder_name) : null),
       h("td", { class: "num", title: DAYS_NOTE }, extraDays(w) > 0 ? `${NUM.format(w.activity.distinct_days)}–${NUM.format(w.days_upper)}` : NUM.format(w.activity.distinct_days)),
@@ -406,7 +495,7 @@
       h("td", { class: "num" }, w.items_used ? NUM.format(w.items_used) : "–"),
       h("td", { class: "num" }, bytes(w.size_bytes)),
       h("td", null, w.version_name || "–"),
-      h("td", null, strip(w, "strip", 20))));
+      h("td", null, ax ? zoomStrip(w, ax, 20) : strip(w, "strip", 20))));
     return h("table", { class: "worlds" }, h("thead", null, head), h("tbody", null, rows));
   }
 
@@ -503,9 +592,7 @@
       tip.replaceChildren(
         h("div", null, `Week van ${DATE.format(new Date(axisStart + i * WEEK_MS))}`),
         counts[i] ? h("div", null, `${counts[i]} ${counts[i] === 1 ? "wereld" : "werelden"} actief`) : h("div", { class: "muted" }, "geen activiteit"));
-      tip.hidden = false;
-      tip.style.left = `${Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8)}px`;
-      tip.style.top = `${ev.clientY + 14}px`;
+      placeTip(ev);
     });
     const finish = () => { if (dragging === null) return; dragging = null; setHash(); render(); };
     svg.addEventListener("pointerup", finish);
@@ -681,9 +768,7 @@
         if (dimMap.minutes[i]) lines.push(h("div", { class: "muted" }, `${NUM.format(dimMap.minutes[i])} min spelers in de buurt`));
       }
       tip.replaceChildren(...lines);
-      tip.hidden = false;
-      tip.style.left = `${Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8)}px`;
-      tip.style.top = `${ev.clientY + 14}px`;
+      placeTip(ev);
     });
     svg.addEventListener("mouseleave", hideTip);
     return svg;
@@ -1022,7 +1107,7 @@
     dlg.scrollTop = 0;
     setHash();
   }
-  $("#detail").addEventListener("close", setHash);
+  $("#detail").addEventListener("close", () => { hideTip(); document.body.append(tip); setHash(); });
   $("#detail").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
   // ---------- wiring ----------
@@ -1043,6 +1128,12 @@
       render();
     });
   }
+
+  // The table header sticks just below the (sticky) controls, however many rows they wrap to.
+  const controls = document.querySelector(".controls");
+  const stickBelowControls = () => document.documentElement.style.setProperty("--controls-height", `${controls.offsetHeight}px`);
+  stickBelowControls();
+  if (window.ResizeObserver) new ResizeObserver(stickBelowControls).observe(controls);
 
   const dayInput = (el) => (/^\d{4}-\d{2}-\d{2}$/.test(el.value) ? parseDay(el.value) : null);
   for (const el of [$("#t-from"), $("#t-to")]) {
