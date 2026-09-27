@@ -49,6 +49,32 @@ uv run mcatlas verify          # prove the archive is unchanged
 Other commands: `inventory` (list worlds without analyzing), `search TEXT` (names, players,
 signs, books, notes), `show WORLD`, `note WORLD [TEXT] [--title --tag --rating]`, `notes`.
 
+## Adding worlds later
+
+mcatlas only reads **Java Edition** worlds, and only 1.13+ chunks are analyzed in depth and
+rendered in 3D. For anything else, work on a *copy* outside the archive first:
+
+1. **Bedrock** (phone, tablet, Switch, Xbox One/Series, Windows "Minecraft") and **old console
+   editions** (Wii U, Xbox 360, PS3/PS4: "Legacy Console Edition") store worlds in their own
+   formats: convert the copy to Java with a converter tool first.
+2. **Old Java worlds** (and converter output, which is often pre-1.13; recognisable by a
+   `level.dat_mcr` or no DataVersion): open the copy once in a recent Java version and use
+   *Edit World → Optimize World* to rewrite all chunks in the current format. Minecraft
+   writes to the world while doing this, so never do it inside the archive.
+3. Put the resulting folder into the archive yourself (mcatlas never writes there), then:
+
+```sh
+uv run mcatlas verify            # should list only your new files as "added"
+uv run mcatlas snapshot          # new baseline that includes them
+uv run mcatlas analyze --tier 2  # only new or changed worlds are analyzed
+uv run mcatlas render            # only new maps; also refreshes the site
+```
+
+Converting and optimizing re-save every chunk, which has two side effects: the day you did it
+shows up as a play day of that world, and mcatlas no longer sees the copy as related to the
+original (it recognises copies by their chunk save times). Keep the original next to the copy
+if you like, and write both facts in a note (`mcatlas note`).
+
 ## 3D maps (BlueMap)
 
 `mcatlas render` shows every build site in 3D with the
