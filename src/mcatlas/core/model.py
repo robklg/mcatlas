@@ -6,7 +6,10 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
-from typing import NewType, Protocol
+from typing import Literal, NewType, Protocol
+
+type Language = Literal["en", "nl"]
+"""Language of everything people read: the site's default, the atlas, the 3D map markers."""
 
 WorldId = NewType("WorldId", str)
 """Stable, URL- and BlueMap-safe identifier: `<slug>-<6 hex>` derived from source + path."""

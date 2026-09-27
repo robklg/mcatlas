@@ -339,7 +339,7 @@ def build_site(
     try:
         catalog, location, problems = publish_site(
             store,
-            StaticSiteWriter(settings.paths.site_dir),
+            StaticSiteWriter(settings.paths.site_dir, language=settings.language),
             _names(settings),
             settings.analysis.zone(),
             ignore_file_days=settings.analysis.ignore_file_days,
@@ -368,7 +368,7 @@ def serve(
     settings = _settings()
     notes = _notes(settings)
     by_id = {e.world_id: e for e in _load(settings).worlds}
-    site = StaticSiteWriter(settings.paths.site_dir)
+    site = StaticSiteWriter(settings.paths.site_dir, language=settings.language)
 
     def on_note(world_id: str, payload: Mapping[str, object]) -> Mapping[str, object]:
         entry = by_id[WorldId(world_id)]
@@ -449,7 +449,7 @@ def render(
         try:
             _, location, _ = publish_site(
                 store,
-                StaticSiteWriter(settings.paths.site_dir),
+                StaticSiteWriter(settings.paths.site_dir, language=settings.language),
                 _names(settings),
                 settings.analysis.zone(),
                 ignore_file_days=settings.analysis.ignore_file_days,
@@ -635,7 +635,7 @@ def note(
             entry,
             change,
             datetime.now().astimezone(),
-            StaticSiteWriter(settings.paths.site_dir),
+            StaticSiteWriter(settings.paths.site_dir, language=settings.language),
         )
     except (AnnotationStoreError, ValueError) as e:
         err.print(f"[red]{e}[/]")

@@ -51,7 +51,7 @@ Other commands: `inventory` (list worlds without analyzing), `search TEXT` (name
 signs, books, notes), `show WORLD`, `note WORLD [TEXT] [--title --tag --rating]`, `notes`.
 
 On the site, drag across the timeline (or pick dates) to see which worlds were played in a
-period; the other filters narrow the timeline too, and the URL (`#van=…&tot=…`) keeps the
+period; the other filters narrow the timeline too, and the URL (`#from=…&to=…`) keeps the
 period for a bookmark.
 
 ## Adding worlds later

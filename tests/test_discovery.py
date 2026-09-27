@@ -18,10 +18,7 @@ def test_dimension_keys():
     assert dimension_for_region_dir("DIM-1/region") == "minecraft:the_nether"
     assert dimension_for_region_dir("DIM1/region") == "minecraft:the_end"
     assert dimension_for_region_dir("DIM597088138/region") == "legacy:dim597088138"
-    assert (
-        dimension_for_region_dir("dimensions/minecraft/skylands/region")
-        == "minecraft:skylands"
-    )
+    assert dimension_for_region_dir("dimensions/minecraft/skylands/region") == "minecraft:skylands"
     assert dimension_for_region_dir("weird/place/region") == "other:weird/place"
 
 

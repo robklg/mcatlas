@@ -15,9 +15,9 @@ from typing import Final
 from mcatlas.adapters.outputs import atomic_write, write_if_changed
 from mcatlas.core.annotations import Annotation
 from mcatlas.core.catalog import Catalog
-from mcatlas.core.model import WorldId
+from mcatlas.core.model import Language, WorldId
 
-_ASSETS: Final = ("index.html", "style.css", "app.js")
+_ASSETS: Final = ("index.html", "style.css", "i18n.js", "app.js")
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -40,8 +40,9 @@ def _script(assignment: str, payload: str) -> bytes:
 
 
 class StaticSiteWriter:
-    def __init__(self, site_dir: Path) -> None:
+    def __init__(self, site_dir: Path, *, language: Language = "en") -> None:
         self._dir = site_dir
+        self._language: Language = language
 
     def write(
         self,
@@ -61,7 +62,9 @@ class StaticSiteWriter:
                 "worlds": {"__all__": {"annotation"}},
             }
         )
-        _write(self._dir / "data" / "catalog.js", _script("MCATLAS_CATALOG = ", payload))
+        # The default language; visitors can switch on the site (their choice is remembered).
+        default = f"window.MCATLAS_LANG = {json.dumps(self._language)};\n".encode()
+        _write(self._dir / "data" / "catalog.js", default + _script("MCATLAS_CATALOG = ", payload))
         for world_id, build_map in catalog.maps.items():
             key = json.dumps(world_id)
             _write(

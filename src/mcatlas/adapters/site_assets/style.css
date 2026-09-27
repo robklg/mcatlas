@@ -70,6 +70,8 @@ button, select, input { font: inherit; color: inherit; }
 .top { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 12px; }
 .subtitle { margin: 2px 0 0; color: var(--ink-2); }
 .ghost { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.top-actions { display: flex; gap: 8px; align-items: center; }
+select.ghost { padding: 3px 6px; }
 
 .controls {
   display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;

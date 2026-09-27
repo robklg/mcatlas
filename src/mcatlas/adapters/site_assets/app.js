@@ -3,24 +3,50 @@
   const CATALOG = window.MCATLAS_CATALOG;
   const NOTES = window.MCATLAS_ANNOTATIONS || {};
   const $ = (sel) => document.querySelector(sel);
-  const NUM = new Intl.NumberFormat("nl-NL");
-  const DEC = new Intl.NumberFormat("nl-NL", { maximumFractionDigits: 1 });
-  const DATE = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-  const MONTH = new Intl.DateTimeFormat("nl-NL", { month: "short", timeZone: "UTC" });
   const DAY_MS = 86400000;
   const WEEK_MS = 7 * DAY_MS;
 
+  // ---------- language: interface texts from i18n.js, formats from Intl ----------
+  const I18N = window.MCATLAS_I18N;
+  const LANG_KEY = "mcatlas-lang";
+  function storedLang() { try { return localStorage.getItem(LANG_KEY); } catch { return null; } }
+  const known = (l) => (l && I18N[l] ? l : null);
+  // The viewer's own choice, else the default from mcatlas's config, else English.
+  let lang = known(storedLang()) || known(window.MCATLAS_LANG) || "en";
+  let NUM; let DEC; let DATE; let MONTH; let NOTE_DATE; let PLURAL;
+  function setFormats() {
+    const loc = I18N[lang].locale;
+    NUM = new Intl.NumberFormat(loc);
+    DEC = new Intl.NumberFormat(loc, { maximumFractionDigits: 1 });
+    DATE = new Intl.DateTimeFormat(loc, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    MONTH = new Intl.DateTimeFormat(loc, { month: "short", timeZone: "UTC" });
+    NOTE_DATE = new Intl.DateTimeFormat(loc, { dateStyle: "medium", timeStyle: "short" });
+    PLURAL = new Intl.PluralRules(loc);
+  }
+  setFormats();
+  // t("days", { n: 3 }) → "3 dagen"; numbers in {…} are formatted for the language.
+  function t(key, vars = {}) {
+    let v = I18N[lang][key] ?? I18N.en[key] ?? key;
+    if (typeof v === "object") v = v[PLURAL.select(vars.n ?? 0)] ?? v.other;
+    return v.replace(/\{(\w+)\}/g, (m, k) => {
+      if (!(k in vars)) return m;
+      return typeof vars[k] === "number" ? NUM.format(vars[k]) : String(vars[k]);
+    });
+  }
+  function applyStaticTexts() {
+    document.documentElement.lang = lang;
+    for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+    for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
+    for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
+    for (const el of document.querySelectorAll("[data-i18n-aria-label]")) el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel));
+    $("#lang").value = lang;
+  }
+  applyStaticTexts();
+
   const blockName = (id) => id.replace(/^minecraft:/, "").replaceAll("_", " ");
-  const MODES = { 0: "Overleven", 1: "Creatief", 2: "Avontuur", 3: "Toeschouwer" };
-  const GENERATORS = {
-    default: "Normaal", flat: "Superflat", void: "Leeg (void)", amplified: "Amplified",
-    large_biomes: "Grote biomen", single_biome: "Eén bioom", debug: "Debug",
-    custom: "Aangepast", unknown: "Onbekend",
-  };
-  const FORMATS = {
-    anvil: null, mcregion: "Oud formaat (Beta)", no_terrain: "Geen terrein",
-    no_level_dat: "Geen level.dat", empty: "Lege map",
-  };
+  const modeName = (m) => t(`mode_${m}`);
+  const generatorName = (g) => t(`gen_${g}`);
+  const formatName = (f) => (f === "anvil" ? null : t(`format_${f}`));
 
   // ---------- 3D maps (BlueMap); the viewer only works through `mcatlas serve` ----------
   const SERVED = location.protocol.startsWith("http");
@@ -68,8 +94,8 @@
 
   // ---------- theme ----------
   function storedTheme() { try { return localStorage.getItem("mcatlas-theme"); } catch { return null; } }
-  function applyTheme(t) {
-    if (t) document.documentElement.setAttribute("data-theme", t);
+  function applyTheme(th) {
+    if (th) document.documentElement.setAttribute("data-theme", th);
     else document.documentElement.removeAttribute("data-theme");
   }
   applyTheme(storedTheme());
@@ -82,7 +108,7 @@
   });
 
   if (!CATALOG) {
-    $("#summary").textContent = "Geen catalogus gevonden (data/catalog.js ontbreekt).";
+    $("#summary").textContent = t("no_catalog");
     return;
   }
 
@@ -103,7 +129,7 @@
   function setNote(w, note) {
     w._note = note && (note.title || note.note || note.tags.length || note.rating) ? note : null;
     const n = w._note;
-    w._search = n ? `${w._baseSearch} ${[n.title, n.note, ...n.tags].join(" ").toLocaleLowerCase("nl")}` : w._baseSearch;
+    w._search = n ? `${w._baseSearch} ${[n.title, n.note, ...n.tags].join(" ").toLocaleLowerCase()}` : w._baseSearch;
   }
   let notesWritable = false;
   async function checkNotesApi() {
@@ -130,17 +156,17 @@
     }
     w._bins = bins;
     const m = /^(\d+)\.(\d+)/.exec(w.version_name || "");
-    w._family = m ? `${m[1]}.${m[2]}` : (w.version_name ? "snapshot/overig" : "onbekend");
+    w._family = m ? `${m[1]}.${m[2]}` : (w.version_name ? "family_other" : "family_unknown");
     w._playerNames = w.players.map((p) => p.name || p.uuid.slice(0, 8));
     const topBlocks = w.build ? w.build.top_blocks.map(([id]) => blockName(id)) : [];
     w._downloaded = Object.keys(w.activity.history || {}).length > 0;
-    w._baseSearch = null;
     w._texts = [];
     w._textSearch = "";
     w._baseSearch = [w.name, w.folder_name, w.level_name, w.relpath, ...w._playerNames, ...topBlocks]
-      .filter(Boolean).join(" ").toLocaleLowerCase("nl");
+      .filter(Boolean).join(" ").toLocaleLowerCase();
     setNote(w, NOTES[w.world_id] || null);
   }
+  const familyName = (f) => (f.startsWith("family_") ? t(f) : f);
   // A "copy" is a world that shares ≥90% history with a higher-scored one.
   for (const w of CATALOG.worlds) {
     w._copyOf = null;
@@ -163,16 +189,18 @@
   }
   function period(w) {
     const a = w.activity;
-    if (!a.first_day) return "geen datums";
+    if (!a.first_day) return t("no_dates");
     if (a.first_day === a.last_day) return fmtDay(a.first_day);
     return `${fmtDay(a.first_day)} – ${fmtDay(a.last_day)}`;
   }
-  const hours = (x) => `${DEC.format(x)} u`;
+  const hours = (x) => t("hours", { x: DEC.format(x) });
+  const dayMonth = (ms) => DATE.formatToParts(new Date(ms)).filter((p) => p.type !== "year")
+    .map((p) => p.value).join("").replace(/[\s,]+$/, "");
 
   // ---------- time range: worlds with activity between two days ----------
-  const isoDay = (t) => new Date(t).toISOString().slice(0, 10);
+  const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
   const hasRange = () => state.from !== null || state.to !== null;
-  const inRange = (t) => (state.from === null || t >= state.from) && (state.to === null || t <= state.to);
+  const inRange = (ms) => (state.from === null || ms >= state.from) && (state.to === null || ms <= state.to);
   // A week column counts as inside when any of its days is.
   const binInRange = (i) => {
     const start = axisStart + i * WEEK_MS;
@@ -186,7 +214,7 @@
     const W = 1000; const H = height; const gap = 2;
     const bw = W / binCount;
     const svg = s("svg", { class: cls, viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img",
-      "aria-label": `Activiteit per week: ${w.activity.distinct_days} actieve dagen, ${period(w)}` });
+      "aria-label": t("strip_aria", { n: w.activity.distinct_days, period: period(w) }) });
     for (const y of years) {
       svg.append(s("line", { x1: y.frac * W, x2: y.frac * W, y1: 0, y2: H, stroke: "var(--grid)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
     }
@@ -200,7 +228,7 @@
     svg.addEventListener("mousemove", (ev) => {
       const box = svg.getBoundingClientRect();
       const i = Math.floor(((ev.clientX - box.left) / box.width) * binCount);
-      showBinTip(w, i, ev);
+      showWeekTip(axisStart + i * WEEK_MS, w._bins[i], ev);
     });
     svg.addEventListener("mouseleave", hideTip);
     wrap.append(svg);
@@ -208,15 +236,12 @@
   }
 
   const tip = $("#tooltip");
-  function showBinTip(w, i, ev) {
-    const start = axisStart + i * WEEK_MS;
-    const bin = w._bins[i];
+  function showWeekTip(start, days, ev) {
     tip.replaceChildren(
-      h("div", null, `Week van ${DATE.format(new Date(start))}`),
-      bin
-        ? h("div", null, `${bin.length} actieve ${bin.length === 1 ? "dag" : "dagen"}: `,
-            bin.map((d) => DATE.format(new Date(d.t)).replace(/ \d{4}$/, "")).join(", "))
-        : h("div", { class: "muted" }, "geen activiteit"),
+      h("div", null, t("week_of", { date: DATE.format(new Date(start)) })),
+      days
+        ? h("div", null, `${t("active_days", { n: days.length })}: `, days.map((d) => dayMonth(d.t)).join(", "))
+        : h("div", { class: "muted" }, t("no_activity")),
     );
     placeTip(ev);
   }
@@ -252,10 +277,10 @@
     const d = new Date(ax.start);
     for (let y = d.getUTCFullYear(), m = d.getUTCMonth() + 1; ; m++) {
       if (m > 11) { m = 0; y++; }
-      const t = Date.UTC(y, m, 1);
-      if (t >= ax.start + span) break;  // a boundary at the very end marks nothing
+      const ms = Date.UTC(y, m, 1);
+      if (ms >= ax.start + span) break;  // a boundary at the very end marks nothing
       if (byYear && m !== 0) continue;
-      marks.push({ frac: (t - ax.start) / span, label: m === 0 || byYear ? String(y) : MONTH.format(new Date(t)) });
+      marks.push({ frac: (ms - ax.start) / span, label: m === 0 || byYear ? String(y) : MONTH.format(new Date(ms)) });
     }
     return marks;
   }
@@ -268,12 +293,12 @@
     });
     return row;
   }
-  const SIGNALS = [["chunk_saves", "chunks opgeslagen"], ["advancements", "advancements"], ["file_saves", "bestanden"]];
+  const SIGNALS = ["chunk_saves", "advancements", "file_saves"];
   function zoomStrip(w, ax, height) {
     const W = 1000; const H = height;
     const bw = W / ax.count; const gap = ax.count > 300 ? 0.5 : 1.5;
     const svg = s("svg", { class: "strip", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img",
-      "aria-label": `Activiteit in de gekozen periode: ${daysInRange(w)} dagen` });
+      "aria-label": t("zoom_aria", { n: daysInRange(w) }) });
     for (const mk of axisMarks(ax)) {
       svg.append(s("line", { x1: mk.frac * W, x2: mk.frac * W, y1: 0, y2: H, stroke: "var(--grid)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
     }
@@ -294,17 +319,11 @@
       const i = Math.min(ax.count - 1, Math.max(0, Math.floor(((ev.clientX - box.left) / box.width) * ax.count)));
       const col = cols[i];
       const start = ax.start + i * (ax.daily ? DAY_MS : WEEK_MS);
-      if (ax.daily) {
-        const sig = col ? col[0].sig : null;
-        const evidence = sig ? SIGNALS.filter(([k]) => sig[k]).map(([k, label]) => `${NUM.format(sig[k])} ${label}`) : [];
-        tip.replaceChildren(h("div", null, DATE.format(new Date(start))),
-          sig ? h("div", null, evidence.join(", ") || "laatst gespeeld") : h("div", { class: "muted" }, "geen activiteit"));
-      } else {
-        tip.replaceChildren(h("div", null, `Week van ${DATE.format(new Date(start))}`),
-          col ? h("div", null, `${col.length} actieve ${col.length === 1 ? "dag" : "dagen"}: `,
-            col.map((d) => DATE.format(new Date(d.t)).replace(/ \d{4}$/, "")).join(", "))
-            : h("div", { class: "muted" }, "geen activiteit"));
-      }
+      if (!ax.daily) { showWeekTip(start, col, ev); return; }
+      const sig = col ? col[0].sig : null;
+      const evidence = sig ? SIGNALS.filter((k) => sig[k]).map((k) => `${NUM.format(sig[k])} ${t(`sig_${k}`)}`) : [];
+      tip.replaceChildren(h("div", null, DATE.format(new Date(start))),
+        sig ? h("div", null, evidence.join(", ") || t("last_played_only")) : h("div", { class: "muted" }, t("no_activity")));
       placeTip(ev);
     });
     svg.addEventListener("mouseleave", hideTip);
@@ -323,15 +342,15 @@
   function badges(w) {
     const list = [];
     if (w.version_name) list.push(h("span", { class: "badge" }, w.version_name));
-    if (w.game_mode !== null && w.game_mode !== undefined) list.push(h("span", { class: "badge" }, MODES[w.game_mode]));
-    if (w.generator && w.generator !== "default") list.push(h("span", { class: "badge" }, GENERATORS[w.generator] || w.generator));
-    if (FORMATS[w.format]) list.push(h("span", { class: "badge warn" }, FORMATS[w.format]));
+    if (w.game_mode !== null && w.game_mode !== undefined) list.push(h("span", { class: "badge" }, modeName(w.game_mode)));
+    if (w.generator && w.generator !== "default") list.push(h("span", { class: "badge" }, generatorName(w.generator)));
+    if (formatName(w.format)) list.push(h("span", { class: "badge warn" }, formatName(w.format)));
     if (w.hardcore) list.push(h("span", { class: "badge" }, "Hardcore"));
     if (w.modded) list.push(h("span", { class: "badge" }, "Mods"));
-    if (w.afk_suspect) list.push(h("span", { class: "badge warn", title: `Gemiddeld ${hours(w.hours_per_session)} per sessie: het spel heeft waarschijnlijk lang aan gestaan, dus de speeltijd is te hoog` }, "mogelijk AFK"));
-    if (w._copyOf) list.push(h("span", { class: "badge", title: `Deelt geschiedenis met ${w._copyOf.folder_name}` }, "kopie"));
+    if (w.afk_suspect) list.push(h("span", { class: "badge warn", title: t("badge_afk_title", { h: hours(w.hours_per_session) }) }, t("badge_afk")));
+    if (w._copyOf) list.push(h("span", { class: "badge", title: t("badge_copy_title", { name: w._copyOf.folder_name }) }, t("badge_copy")));
     if (Object.keys(w.activity.history || {}).length) {
-      list.push(h("span", { class: "badge", title: "Bevat activiteit van vóór onze spelers, bijvoorbeeld van de makers van een gedownloade map" }, "met voorgeschiedenis"));
+      list.push(h("span", { class: "badge", title: t("badge_history_title") }, t("badge_history")));
     }
     return h("div", { class: "badges" }, list);
   }
@@ -339,22 +358,29 @@
   // ---------- controls ----------
   const state = { from: null, to: null, q: "", sort: "importance", version: "", mode: "", player: "", generator: "", underground: "", hideCopies: false, hideDownloaded: false, onlyNoted: false, view: "cards" };
 
+  const uniq = (xs) => [...new Set(xs)].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  // (Re)fill a filter menu after its first "all" option, keeping the current choice.
   function fillSelect(sel, values, label) {
+    const keep = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
     for (const v of values) sel.append(h("option", { value: v }, label ? label(v) : v));
+    sel.value = keep;
   }
-  const uniq = (xs) => [...new Set(xs)].sort((a, b) => String(a).localeCompare(String(b), "nl", { numeric: true }));
-  fillSelect($("#f-version"), uniq(CATALOG.worlds.map((w) => w._family)));
-  fillSelect($("#f-mode"), uniq(CATALOG.worlds.map((w) => w.game_mode).filter((m) => m !== null)), (m) => MODES[m]);
-  fillSelect($("#f-player"), uniq(CATALOG.worlds.flatMap((w) => w._playerNames)));
-  fillSelect($("#f-generator"), uniq(CATALOG.worlds.map((w) => w.generator)), (g) => GENERATORS[g] || g);
+  function fillFilters() {
+    fillSelect($("#f-version"), uniq(CATALOG.worlds.map((w) => w._family)), familyName);
+    fillSelect($("#f-mode"), uniq(CATALOG.worlds.map((w) => w.game_mode).filter((m) => m !== null)), modeName);
+    fillSelect($("#f-player"), uniq(CATALOG.worlds.flatMap((w) => w._playerNames)));
+    fillSelect($("#f-generator"), uniq(CATALOG.worlds.map((w) => w.generator)), generatorName);
+  }
+  fillFilters();
 
-  const DAYS_NOTE = "Ondergrens: dagen met een datum als bewijs. Bovengrens: het aantal sessies (leave_game), want elke speeldag heeft er minstens één.";
   const extraDays = (w) => (w.days_upper ? w.days_upper - w.activity.distinct_days : 0);
-  function daysText(w, unit) {
-    const n = w.activity.distinct_days;
-    const base = unit ? `${NUM.format(n)} ${n === 1 ? "dag" : "dagen"}` : NUM.format(n);
-    return extraDays(w) > 0 ? `${base} (max. ~${NUM.format(w.days_upper)})` : base;
+  function daysText(w) {
+    const base = t("days", { n: w.activity.distinct_days });
+    return extraDays(w) > 0 ? t("days_max", { days: base, n: w.days_upper }) : base;
   }
+  const daysRange = (w) => (extraDays(w) > 0
+    ? `${NUM.format(w.activity.distinct_days)}–${NUM.format(w.days_upper)}` : NUM.format(w.activity.distinct_days));
 
   const UNDERGROUND = {
     mostly: (p) => p !== null && p !== undefined && p >= 50,
@@ -375,17 +401,17 @@
     chunks: (w) => -w.chunks,
     built: (w) => -(w.build ? w.build.built : -1),
     below: (w) => -(w.build && w.build.pct_below !== null ? w.build.pct_below : -1),
-    name: (w) => w.name.toLocaleLowerCase("nl"),
+    name: (w) => w.name.toLocaleLowerCase(),
     inRange: (w) => -daysInRange(w),
   };
 
   // `ignoreRange`: every other filter, for the overview timeline that picks the range.
   function visibleWorlds(ignoreRange = false) {
-    const terms = state.q.toLocaleLowerCase("nl").split(/\s+/).filter(Boolean);
+    const terms = queryTerms();
     const key = SORTS[state.sort];
     return CATALOG.worlds
       .filter((w) => ignoreRange || !hasRange() || w._days.some((d) => inRange(d.t)))
-      .filter((w) => terms.every((t) => w._search.includes(t) || w._textSearch.includes(t)))
+      .filter((w) => terms.every((q) => w._search.includes(q) || w._textSearch.includes(q)))
       .filter((w) => !state.version || w._family === state.version)
       .filter((w) => !state.mode || String(w.game_mode) === state.mode)
       .filter((w) => !state.player || w._playerNames.includes(state.player))
@@ -398,23 +424,22 @@
         const ka = key(a); const kb = key(b);
         if (ka < kb) return -1;
         if (ka > kb) return 1;
-        return a.name.localeCompare(b.name, "nl");
+        return a.name.localeCompare(b.name);
       });
   }
 
   // ---------- texts: signs, books, names, commands (loaded after the page) ----------
-  const TEXT_KINDS = { sign: "bordje", book: "boek", name: "naam", command: "commando" };
-  const TEXT_PLURAL = { sign: "bordjes", book: "boeken", name: "namen", command: "commando's" };
+  const kindName = (k) => t(`kind_${k}`);
   function textSummary(w) {
     const parts = Object.entries(w.text_counts || {}).sort((a, b) => b[1] - a[1])
-      .map(([k, n]) => `${NUM.format(n)} ${n === 1 ? TEXT_KINDS[k] : TEXT_PLURAL[k]}`);
-    return parts.length ? `Teksten: ${parts.join(", ")}` : null;
+      .map(([k, n]) => t(`count_${k}`, { n }));
+    return parts.length ? t("texts_line", { list: parts.join(", ") }) : null;
   }
-  const queryTerms = () => state.q.toLocaleLowerCase("nl").split(/\s+/).filter(Boolean);
+  const queryTerms = () => state.q.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   function textMatches(w) {
     const terms = queryTerms();
     if (!terms.length) return [];
-    return w._texts.filter((t) => { if (t[7]) return false; const low = t[1].toLocaleLowerCase("nl"); return terms.some((q) => low.includes(q)); });
+    return w._texts.filter((x) => { if (x[7]) return false; const low = x[1].toLocaleLowerCase(); return terms.some((q) => low.includes(q)); });
   }
   function textHit(w) {
     const terms = queryTerms();
@@ -424,7 +449,7 @@
   function snippet(text) {
     const flat = text.replace(/\s+/g, " ");
     const terms = queryTerms();
-    const low = flat.toLocaleLowerCase("nl");
+    const low = flat.toLocaleLowerCase();
     const at = Math.max(0, ...terms.map((q) => low.indexOf(q)));
     const start = Math.max(0, at - 40);
     return `${start ? "…" : ""}${flat.slice(start, start + 140)}${flat.length > start + 140 ? "…" : ""}`;
@@ -437,7 +462,7 @@
       for (const w of CATALOG.worlds) {
         w._texts = all[w.world_id] || [];
         // Texts of a downloaded map's makers stay visible in the detail view, not in search.
-        w._textSearch = w._texts.filter((t) => !t[7]).map((t) => t[1]).join("\n").toLocaleLowerCase("nl");
+        w._textSearch = w._texts.filter((x) => !x[7]).map((x) => x[1]).join("\n").toLocaleLowerCase();
       }
       render();
       if ($("#detail").open && openWorld) openDetail(openWorld);
@@ -448,17 +473,17 @@
   // ---------- views ----------
   function card(w) {
     const facts = h("div", { class: "facts" },
-      hasRange() ? [h("b", { class: "in-range" }, `${NUM.format(daysInRange(w))} ${daysInRange(w) === 1 ? "dag" : "dagen"} in de gekozen periode`), " · "] : null,
-      h("b", { title: DAYS_NOTE }, daysText(w, true)), " · ",
+      hasRange() ? [h("b", { class: "in-range" }, t("days_in_range", { n: daysInRange(w) })), " · "] : null,
+      h("b", { title: t("days_note") }, daysText(w)), " · ",
       period(w),
       w.play_hours ? [" · ", h("b", null, hours(w.play_hours))] : null,
-      w.items_used ? [" · ", NUM.format(w.items_used), " items"] : null,
-      w.build && w.build.built ? [" · ", h("b", null, `${NUM.format(w.build.built)} blokken gebouwd`),
-        w.build.pct_below !== null ? ` (${DEC.format(w.build.pct_below)}% onder de grond)` : null] : null,
+      w.items_used ? [" · ", t("items", { n: w.items_used })] : null,
+      w.build && w.build.built ? [" · ", h("b", null, t("blocks_built", { n: w.build.built })),
+        w.build.pct_below !== null ? ` (${t("pct_underground", { p: DEC.format(w.build.pct_below) })})` : null] : null,
       " · ", bytes(w.size_bytes));
-    const names = w._playerNames.length ? `Spelers: ${w._playerNames.join(", ")}` : null;
+    const names = w._playerNames.length ? t("players_line", { list: w._playerNames.join(", ") }) : null;
     const hit = textHit(w);
-    return h("article", { class: "card", tabindex: 0, role: "button", "aria-label": `Open ${w.name}`,
+    return h("article", { class: "card", tabindex: 0, role: "button", "aria-label": t("open_world", { name: w.name }),
       onclick: () => openDetail(w), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(w); } } },
       icon(w),
       h("div", null,
@@ -467,10 +492,10 @@
         badges(w)),
       facts,
       strip(w, "strip", 28),
-      w._note ? h("div", { class: "note-line" }, h("b", null, w._note.title || "Notitie"),
+      w._note ? h("div", { class: "note-line" }, h("b", null, w._note.title || t("note")),
         w._note.rating ? ` ${"★".repeat(w._note.rating)}` : null,
         w._note.tags.length ? h("span", { class: "folder" }, ` · ${w._note.tags.join(", ")}`) : null) : null,
-      hit ? h("div", { class: "hit" }, `${TEXT_KINDS[hit[0]]}: `, h("q", null, snippet(hit[1]))) : null,
+      hit ? h("div", { class: "hit" }, `${kindName(hit[0])}: `, h("q", null, snippet(hit[1]))) : null,
       textSummary(w) ? h("div", { class: "people" }, textSummary(w)) : null,
       names ? h("div", { class: "people" }, names) : null);
   }
@@ -478,18 +503,18 @@
   function table(worlds) {
     const ax = hasRange() ? zoomAxis() : null;
     const cols = [
-      ["Naam", "name"], ["Dagen", "days"], ["Periode", "first"], ["Speeltijd", "play"],
-      ["Items", "used"], ["Grootte", "size"], ["Versie", null], ["Activiteit", null],
+      ["col_name", "name"], ["col_days", "days"], ["col_period", "first"], ["col_play", "play"],
+      ["col_items", "used"], ["col_size", "size"], ["col_version", null], ["col_activity", null],
     ];
     const head = h("tr", null, cols.map(([label, key]) => h("th", {
       onclick: key ? () => { state.sort = key; $("#sort").value = key; render(); } : null,
       "aria-sort": key && state.sort === key ? "descending" : null,
-    }, label === "Activiteit" && ax
-      ? [`Activiteit ${ax.daily ? "per dag" : "per week"}`, zoomTicks(ax)]
-      : label)));
+    }, label === "col_activity" && ax
+      ? [t(ax.daily ? "activity_per_day" : "activity_per_week"), zoomTicks(ax)]
+      : t(label))));
     const rows = worlds.map((w) => h("tr", { onclick: () => openDetail(w) },
       h("td", null, w.name, w.name !== w.folder_name ? h("div", { class: "folder" }, w.folder_name) : null),
-      h("td", { class: "num", title: DAYS_NOTE }, extraDays(w) > 0 ? `${NUM.format(w.activity.distinct_days)}–${NUM.format(w.days_upper)}` : NUM.format(w.activity.distinct_days)),
+      h("td", { class: "num", title: t("days_note") }, daysRange(w)),
       h("td", null, period(w)),
       h("td", { class: "num" }, w.play_hours ? hours(w.play_hours) : "–"),
       h("td", { class: "num" }, w.items_used ? NUM.format(w.items_used) : "–"),
@@ -504,25 +529,26 @@
     const list = $("#list");
     list.className = state.view === "cards" ? "cards" : "";
     if (!worlds.length) {
-      list.replaceChildren(h("p", { class: "empty" }, "Geen werelden gevonden met deze filters."));
+      list.replaceChildren(h("p", { class: "empty" }, t("empty")));
     } else if (state.view === "cards") {
       list.replaceChildren(...worlds.map(card));
     } else {
       list.replaceChildren(table(worlds));
     }
     renderTimeline();
-    const total = CATALOG.worlds.length;
-    const range = hasRange() ? ` actief ${rangeText()}` : "";
+    const range = hasRange() ? t("summary_range", { range: rangeText() }) : "";
     const span = CATALOG.first_day ? ` · ${fmtDay(CATALOG.first_day)} – ${fmtDay(CATALOG.last_day)}` : "";
     const ignored = (CATALOG.ignored_file_days || []).length
-      ? ` · bestandsdatums van ${CATALOG.ignored_file_days.map(fmtDay).join(", ")} genegeerd (archiefkopie)` : "";
-    $("#summary").textContent = `${worlds.length} van ${total} werelden${range}${span}${ignored}`;
+      ? t("summary_ignored", { days: CATALOG.ignored_file_days.map(fmtDay).join(", ") }) : "";
+    $("#summary").textContent = `${t("summary", { shown: worlds.length, total: CATALOG.worlds.length })}${range}${span}${ignored}`;
   }
 
   // ---------- overview timeline: pick a range by dragging ----------
   function rangeText() {
-    if (state.from !== null && state.to !== null) return `van ${DATE.format(new Date(state.from))} tot en met ${DATE.format(new Date(state.to))}`;
-    return state.from !== null ? `vanaf ${DATE.format(new Date(state.from))}` : `tot en met ${DATE.format(new Date(state.to))}`;
+    const from = state.from === null ? null : DATE.format(new Date(state.from));
+    const to = state.to === null ? null : DATE.format(new Date(state.to));
+    if (from && to) return t("range_both", { from, to });
+    return from ? t("range_from", { from }) : t("range_to", { to });
   }
   function setRange(from, to) {
     if (from !== null && to !== null && from > to) [from, to] = [to, from];
@@ -533,8 +559,8 @@
   }
   function setHash() {
     const p = new URLSearchParams();
-    if (state.from !== null) p.set("van", isoDay(state.from));
-    if (state.to !== null) p.set("tot", isoDay(state.to));
+    if (state.from !== null) p.set("from", isoDay(state.from));
+    if (state.to !== null) p.set("to", isoDay(state.to));
     if ($("#detail").open && openWorld) p.set("w", openWorld.world_id);
     const hash = p.toString();
     history.replaceState(null, "", hash ? `#${hash}` : location.pathname + location.search);
@@ -547,7 +573,7 @@
     for (const w of visibleWorlds(true)) w._bins.forEach((bin, i) => { if (bin) counts[i]++; });
     const max = Math.max(1, ...counts);
     const svg = s("svg", { class: "overview", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img",
-      "aria-label": "Aantal werelden met activiteit per week; sleep om een periode te kiezen" });
+      "aria-label": t("timeline_aria") });
     for (const y of years) {
       svg.append(s("line", { x1: y.frac * W, x2: y.frac * W, y1: 0, y2: H, stroke: "var(--grid)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
     }
@@ -590,8 +616,8 @@
       if (dragging !== null) { weekRange(dragging, binAt(ev)); paint(); return; }
       const i = binAt(ev);
       tip.replaceChildren(
-        h("div", null, `Week van ${DATE.format(new Date(axisStart + i * WEEK_MS))}`),
-        counts[i] ? h("div", null, `${counts[i]} ${counts[i] === 1 ? "wereld" : "werelden"} actief`) : h("div", { class: "muted" }, "geen activiteit"));
+        h("div", null, t("week_of", { date: DATE.format(new Date(axisStart + i * WEEK_MS)) })),
+        counts[i] ? h("div", null, t("worlds_active", { n: counts[i] })) : h("div", { class: "muted" }, t("no_activity")));
       placeTip(ev);
     });
     const finish = () => { if (dragging === null) return; dragging = null; setHash(); render(); };
@@ -616,11 +642,11 @@
     const every = months > 30 ? 12 : months > 12 ? 3 : 1;  // keep labels from colliding
     for (let y = start.getUTCFullYear(), m = start.getUTCMonth() + 1; ; m++) {
       if (m > 11) { m = 0; y++; }
-      const t = Date.UTC(y, m, 1);
-      if (t > lastMs) break;
+      const ms = Date.UTC(y, m, 1);
+      if (ms > lastMs) break;
       if (m % every !== 0) continue;
-      const frac = (t - axisStart) / (binCount * WEEK_MS);
-      const label = m === 0 ? String(y) : MONTH.format(new Date(t));
+      const frac = (ms - axisStart) / (binCount * WEEK_MS);
+      const label = m === 0 ? String(y) : MONTH.format(new Date(ms));
       row.append(h("span", { style: `position:absolute;left:${(frac * 100).toFixed(2)}%;transform:translateX(-50%)` }, label));
     }
     return row;
@@ -630,29 +656,26 @@
     const hist = Object.keys(w.activity.history || {}).sort();
     const notes = [];
     if (hist.length) {
-      notes.push(`Voorgeschiedenis: ${hist.length} ${hist.length === 1 ? "dag" : "dagen"} activiteit tussen ${fmtDay(hist[0])} en ${fmtDay(hist[hist.length - 1])}, ` +
-        "van vóór onze eerste advancement (waarschijnlijk de makers van deze map). Die tellen niet mee.");
+      notes.push(t("history_note", { days: t("days", { n: hist.length }), first: fmtDay(hist[0]), last: fmtDay(hist[hist.length - 1]) }));
     }
     if (w.foreign_players) {
-      notes.push(`${w.foreign_players} onbekende ${w.foreign_players === 1 ? "speler" : "spelers"} met samen ${hours(Math.max(0, w.play_hours_all - w.play_hours))} speeltijd; ` +
-        "die telt niet mee in de score zolang er eigen spelers zijn.");
+      notes.push(t("foreign_note", { n: w.foreign_players, h: hours(Math.max(0, w.play_hours_all - w.play_hours)) }));
     }
     return notes.length ? h("p", { class: "folder" }, notes.join(" ")) : null;
   }
 
   // ---------- build (tier 2): what was built, and where ----------
-  const DIMS = { "minecraft:overworld": "Bovenwereld", "minecraft:the_nether": "Nether", "minecraft:the_end": "End" };
-  const dimName = (k) => DIMS[k] || k.replace(/^minecraft:/, "");
+  const DIMS = ["overworld", "the_nether", "the_end"];
+  const dimName = (k) => (DIMS.includes(k.replace(/^minecraft:/, "")) ? t(`dim_${k.replace(/^minecraft:/, "")}`) : k.replace(/^minecraft:/, ""));
   const STRUCTURES = [
-    [/^mineshaft/, "mijnschacht"], [/^village/, "dorp"], [/^ancient_city/, "oude stad"], [/^dungeon/, "kerker"],
-    [/^stronghold/, "fort"], [/^pillager_outpost/, "plunderaarsbuitenpost"], [/^ruined_portal/, "verwoest portaal"],
-    [/^ocean_ruin/, "oceaanruïne"], [/^shipwreck/, "scheepswrak"], [/^buried_treasure/, "begraven schat"],
-    [/^desert_pyramid/, "woestijntempel"], [/^jungle_pyramid/, "jungletempel"], [/^igloo/, "iglo"],
-    [/^swamp_hut/, "heksenhut"], [/^mansion/, "landhuis"], [/^monument/, "oceaanmonument"],
-    [/^fortress/, "Netherfort"], [/^bastion/, "bastion"], [/^end_city/, "Endstad"], [/^trail_ruins/, "spoorruïnes"],
-    [/^trial_chambers/, "beproevingskamers"],
+    "mineshaft", "village", "ancient_city", "dungeon", "stronghold", "pillager_outpost", "ruined_portal",
+    "ocean_ruin", "shipwreck", "buried_treasure", "desert_pyramid", "jungle_pyramid", "igloo", "swamp_hut",
+    "mansion", "monument", "fortress", "bastion", "end_city", "trail_ruins", "trial_chambers",
   ];
-  const structureName = (k) => (STRUCTURES.find(([re]) => re.test(k)) || [null, k.replaceAll("_", " ")])[1];
+  const structureName = (k) => {
+    const known = STRUCTURES.find((name) => k.startsWith(name));
+    return known ? t(`struct_${known}`) : k.replaceAll("_", " ");
+  };
   const pct = (x) => (x === null || x === undefined ? "–" : `${DEC.format(x)}%`);
 
   function loadMap(id) {
@@ -680,9 +703,9 @@
   function copyButton(text) {
     return h("button", { type: "button", class: "ghost small", onclick: (e) => {
       const btn = e.currentTarget;
-      const done = () => { btn.textContent = "gekopieerd"; setTimeout(() => { btn.textContent = "kopieer"; }, 1500); };
-      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => { btn.textContent = "lukt niet"; });
-    } }, "kopieer");
+      const done = () => { btn.textContent = t("copied"); setTimeout(() => { btn.textContent = t("copy"); }, 1500); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => { btn.textContent = t("copy_failed"); });
+    } }, t("copy"));
   }
 
   // Chunks in groups: builds far apart (a /fill at z = 10 million next to the base at spawn)
@@ -736,7 +759,7 @@
     const vx = x0 - pad; const vz = z0 - pad;
     const vw = x1 - x0 + 1 + 2 * pad; const vh = z1 - z0 + 1 + 2 * pad;
     const svg = s("svg", { class: "chunk-map", viewBox: `${vx} ${vz} ${vw} ${vh}`, role: "img",
-      "aria-label": `Kaart van ${dimName(dimMap.key)}: ${idx.length} chunks met bouwwerk of aanwezigheid` });
+      "aria-label": t("map_aria", { dim: dimName(dimMap.key), n: idx.length }) });
     svg.append(s("rect", { x: vx, y: vz, width: vw, height: vh, fill: "var(--surface-2)" }));
     const logMax = Math.log1p(maxBuilt);
     for (const i of idx) {
@@ -752,20 +775,20 @@
     for (const [site, number] of numbered) {
       const cx = site.x / 16; const cz = site.z / 16;
       svg.append(s("circle", { cx, cy: cz, r, fill: "var(--surface)", stroke: "var(--ink)", "stroke-width": r / 5 }));
-      const t = s("text", { x: cx, y: cz, "font-size": r * 1.2, "text-anchor": "middle", "dominant-baseline": "central", fill: "var(--ink)", "font-weight": 600 });
-      t.textContent = String(number);
-      svg.append(t);
+      const label = s("text", { x: cx, y: cz, "font-size": r * 1.2, "text-anchor": "middle", "dominant-baseline": "central", fill: "var(--ink)", "font-weight": 600 });
+      label.textContent = String(number);
+      svg.append(label);
     }
     svg.addEventListener("mousemove", (ev) => {
       const pt = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(svg.getScreenCTM().inverse());
       const cx = Math.floor(pt.x); const cz = Math.floor(pt.y);
       const i = byChunk.get(`${cx},${cz}`);
-      const lines = [h("div", null, `Chunk ${cx}, ${cz} · blokken x ${cx * 16}…${cx * 16 + 15}, z ${cz * 16}…${cz * 16 + 15}`)];
-      if (i === undefined) lines.push(h("div", { class: "muted" }, "niets gebouwd, niet (lang) geweest"));
+      const lines = [h("div", null, t("chunk_tip", { cx: String(cx), cz: String(cz), x0: String(cx * 16), x1: String(cx * 16 + 15), z0: String(cz * 16), z1: String(cz * 16 + 15) }))];
+      if (i === undefined) lines.push(h("div", { class: "muted" }, t("chunk_nothing")));
       else {
         const b = dimMap.built[i];
-        lines.push(h("div", null, b ? `${NUM.format(b)} blokken gebouwd, waarvan ${NUM.format(dimMap.below[i])} onder de grond` : "niets gebouwd"));
-        if (dimMap.minutes[i]) lines.push(h("div", { class: "muted" }, `${NUM.format(dimMap.minutes[i])} min spelers in de buurt`));
+        lines.push(h("div", null, b ? t("chunk_built", { b, below: dimMap.below[i] }) : t("nothing_built")));
+        if (dimMap.minutes[i]) lines.push(h("div", { class: "muted" }, t("minutes_nearby", { n: dimMap.minutes[i] })));
       }
       tip.replaceChildren(...lines);
       placeTip(ev);
@@ -792,15 +815,15 @@
         const cx = Math.floor(site.x / 16); const cz = Math.floor(site.z / 16);
         return cx >= box.x0 - MAP_GAP && cx <= box.x1 + MAP_GAP && cz >= box.z0 - MAP_GAP && cz <= box.z1 + MAP_GAP;
       });
-      const label = inside.length ? `Plek ${inside.map(([, n]) => n).join(", ")} · ` : "";
+      const label = inside.length ? `${t("panel_sites", { n: inside.length, list: inside.map(([, n]) => n).join(", ") })} · ` : "";
       return h("figure", { class: "map-panel" },
         drawMap(dimMap, g, inside, maxBuilt),
         h("figcaption", null, `${label}x ${NUM.format(box.x0 * 16)} … ${NUM.format(box.x1 * 16 + 15)}, z ${NUM.format(box.z0 * 16)} … ${NUM.format(box.z1 * 16 + 15)}`));
     });
     return [
-      h("p", { class: "folder" }, `Deze plekken liggen ver uit elkaar, daarom een kaartje per gebied (elk op eigen schaal).`),
+      h("p", { class: "folder" }, t("far_apart")),
       h("div", { class: "map-panels" }, panels),
-      rest > 0 ? h("p", { class: "folder" }, `Plus ${NUM.format(rest)} ${rest === 1 ? "plekje" : "plekjes"} waar alleen even iemand is geweest.`) : null,
+      rest > 0 ? h("p", { class: "folder" }, t("more_spots", { n: rest })) : null,
     ];
   }
 
@@ -808,8 +831,8 @@
     const entries = Object.entries(b.by_section).map(([k, v]) => [Number(k), v]).sort((a, c) => c[0] - a[0]);
     if (!entries.length) return null;
     const max = Math.max(...entries.map(([, v]) => v));
-    return h("div", { class: "layers", role: "img", "aria-label": "Gebouwde blokken per hoogtelaag" },
-      entries.map(([sec, v]) => h("div", { class: "layer", title: `y ${sec * 16} … ${sec * 16 + 15}: ${NUM.format(v)} blokken` },
+    return h("div", { class: "layers", role: "img", "aria-label": t("layers_aria") },
+      entries.map(([sec, v]) => h("div", { class: "layer", title: t("layer_title", { a: String(sec * 16), b: String(sec * 16 + 15), n: v }) },
         h("span", { class: "label" }, `y ${sec * 16}`),
         h("span", { class: "bar-track" }, h("span", { class: "bar", style: `width:${Math.max(0.5, (100 * v) / max).toFixed(1)}%` })),
         h("span", { class: "num" }, NUM.format(v)))));
@@ -817,10 +840,19 @@
 
   function notCounted(b) {
     const notes = [];
-    if (b.history_built) notes.push(`${NUM.format(b.history_built)} blokken in chunks van vóór onze spelers (de makers van de map)`);
-    if (b.modded) notes.push(`${NUM.format(b.modded)} blokken uit mods (${b.modded_blocks.slice(0, 4).map(([id]) => id.split(":")[1].replaceAll("_", " ")).join(", ")}…)`);
-    if (b.excluded_dimensions.length) notes.push(`${b.excluded_dimensions.length} gegenereerde dimensie(s) van 20w14∞ (willekeurige blokken)`);
-    return notes.length ? h("p", { class: "folder" }, `Niet meegeteld: ${notes.join("; ")}.`) : null;
+    if (b.history_built) notes.push(t("nc_history", { n: b.history_built }));
+    if (b.modded) notes.push(t("nc_modded", { n: b.modded, list: b.modded_blocks.slice(0, 4).map(([id]) => id.split(":")[1].replaceAll("_", " ")).join(", ") }));
+    if (b.excluded_dimensions.length) notes.push(t("nc_excluded", { n: b.excluded_dimensions.length }));
+    return notes.length ? h("p", { class: "folder" }, t("not_counted", { list: notes.join("; ") })) : null;
+  }
+
+  // What a flat map shows, from the build data itself (not from the 3D marker texts).
+  function areaTitle(a) { return a.site === null || a.site === undefined ? t("spawn") : t("site_n", { n: a.site + 1 }); }
+  function areaDetail(w, a) {
+    const site = a.site === null || a.site === undefined || !w.build ? null : w.build.sites[a.site];
+    if (!site) return null;
+    const built = t("blocks_built", { n: site.built });
+    return site.pct_below === null ? built : `${built}, ${t("pct_underground", { p: DEC.format(site.pct_below) })}`;
   }
 
   function viewsSection(w) {
@@ -829,31 +861,29 @@
       for (const [i, path] of Object.entries(m.images)) {
         const a = m.areas[i];
         const where = m.dimension === "minecraft:overworld" ? "" : ` · ${dimName(m.dimension)}`;
-        const title = `${a.label.charAt(0).toUpperCase()}${a.label.slice(1)}${where}`;
-        const img = h("img", { src: path, alt: `Bovenaanzicht van ${title.toLowerCase()}`, loading: "lazy" });
+        const title = `${areaTitle(a)}${where}`;
+        const detail = areaDetail(w, a);
+        const img = h("img", { src: path, alt: t("top_view_of", { what: title }), loading: "lazy" });
         const link = SERVED ? view3d(m, i) : path;
         items.push(h("figure", { class: "view" },
-          h("a", { href: link, target: "_blank", rel: "noopener", title: SERVED ? "Open in 3D" : "Open het plaatje" }, img),
-          h("figcaption", null, h("b", null, title), a.detail && a.detail !== "spawn" ? ` · ${a.detail}` : null,
-            SERVED ? [" · ", h("a", { href: link, target: "_blank", rel: "noopener" }, "open in 3D")] : null)));
+          h("a", { href: link, target: "_blank", rel: "noopener", title: SERVED ? t("open_3d") : t("open_image") }, img),
+          h("figcaption", null, h("b", null, title), detail ? ` · ${detail}` : null,
+            SERVED ? [" · ", h("a", { href: link, target: "_blank", rel: "noopener" }, t("open_3d_link"))] : null)));
       }
     }
     if (!items.length) return null;
-    return [h("h3", null, "Bovenaanzicht"), h("div", { class: "views" }, items),
-      h("p", { class: "folder" }, "Platte kaart per bouwplek (1 pixel is 1 blok, noorden is boven), gemaakt met BlueMap. ",
-        SERVED ? "Klik op een kaart om rond te kijken in 3D." : "Rondkijken in 3D kan als je de catalogus opent met mcatlas serve.")];
+    return [h("h3", null, t("views_h")), h("div", { class: "views" }, items),
+      h("p", { class: "folder" }, t("views_note"), SERVED ? t("views_3d") : t("views_serve"))];
   }
 
   function buildSection(w) {
     const b = w.build;
     if (!b) {
-      const why = w.generator === "debug" ? "Een debugwereld toont alle blokken; er is niets gebouwd."
-        : w.format === "anvil" ? "Nog niet diep geanalyseerd (mcatlas analyze --tier 2)."
-          : "Niet te analyseren voor dit wereldformaat.";
-      return [h("h3", null, "Bouwwerk"), h("p", { class: "folder" }, why)];
+      const why = w.generator === "debug" ? t("why_debug") : w.format === "anvil" ? t("why_not_analyzed") : t("why_format");
+      return [h("h3", null, t("building_h")), h("p", { class: "folder" }, why)];
     }
     const seen = seenSites();
-    const mapBox = h("div", { class: "map-box" }, h("p", { class: "folder" }, "Kaart laden…"));
+    const mapBox = h("div", { class: "map-box" }, h("p", { class: "folder" }, t("map_loading")));
     const siteRows = b.sites.map((site, k) => {
       const key = siteKey(w, site);
       return h("tr", null,
@@ -872,22 +902,20 @@
         })()) : null);
     });
     const sitesTable = b.sites.length ? h("table", { class: "plain sites" },
-      h("thead", null, h("tr", null, ["Bekeken", "Waar", "Blokken", "Onder de grond", "Hoogte (y)", "Chunks", "Tijd in de buurt", "Teleport", ...(SERVED ? ["3D"] : [])]
-        .map((c, i) => h("th", { class: i >= 2 && i <= 6 ? "num" : null }, c)))),
-      h("tbody", null, siteRows)) : h("p", { class: "folder" }, "Geen bouwplekken gevonden.");
+      h("thead", null, h("tr", null, ["sc_seen", "sc_where", "sc_blocks", "sc_underground", "sc_height", "sc_chunks", "sc_nearby", "sc_teleport"]
+        .map((c, i) => h("th", { class: i >= 2 && i <= 6 ? "num" : null }, t(c))), SERVED ? h("th", null, "3D") : null)),
+      h("tbody", null, siteRows)) : h("p", { class: "folder" }, t("no_sites"));
 
     loadMap(w.world_id).then((data) => {
       const dims = data ? data.dimensions.filter((d) => d.x.length) : [];
-      if (!dims.length) { mapBox.replaceChildren(h("p", { class: "folder" }, "Geen kaartgegevens.")); return; }
+      if (!dims.length) { mapBox.replaceChildren(h("p", { class: "folder" }, t("no_map_data"))); return; }
       let current = dims.find((d) => d.key === (b.main_dimension || "minecraft:overworld")) || dims[0];
       const show = () => {
         const sites = b.sites.map((x, k) => [x, k + 1]).filter(([x]) => x.dimension === current.key);
         const picker = dims.length > 1 ? h("div", { class: "map-dims" }, dims.map((d) => h("button", {
           type: "button", class: d === current ? "ghost small active" : "ghost small",
           onclick: () => { current = d; show(); } }, dimName(d.key)))) : null;
-        mapBox.replaceChildren(...[picker, ...dimensionMaps(current, sites), h("p", { class: "folder" },
-          "Elk vakje is een chunk (16×16 blokken); noorden is boven. Blauw: gebouwd (donkerder = meer). ",
-          "Grijs: spelers zijn er geweest zonder te bouwen. Nummers: bouwplekken uit de tabel.")].filter(Boolean));
+        mapBox.replaceChildren(...[picker, ...dimensionMaps(current, sites), h("p", { class: "folder" }, t("map_legend"))].filter(Boolean));
       };
       show();
     });
@@ -896,27 +924,22 @@
       h("span", { class: "badge" }, `${blockName(id)} `, h("b", null, NUM.format(n))))) : null;
     const structs = Object.entries(b.structures);
     return [
-      h("h3", null, "Bouwwerk"),
+      h("h3", null, t("building_h")),
       h("div", { class: "stats" },
-        stat("Gebouwd", `${NUM.format(b.built)} blokken`),
-        stat("Onder de grond", pct(b.pct_below)),
-        stat("Bebouwde chunks", NUM.format(b.built_chunks)),
-        stat("Bouwplekken", NUM.format(b.sites.length))),
-      h("p", { class: "folder" },
-        "Gebouwd = blokken die de wereldgenerator niet zelf plaatst (1 blok = 1 m³). Bouwen met natuurlijke blokken ",
-        "(steen, aarde, stammen) telt niet mee, en blokken van dorpen, mijnschachten en kerkers ook niet; ",
-        "typische dorpsblokken (planken, keien, hooi…) tellen alleen waar spelers minstens een half uur in de buurt waren. ",
-        "Onder de grond = onder het natuurlijke maaiveld; gegraven kelders en kuilen tellen als ondergronds."),
+        stat(t("stat_built"), t("n_blocks", { n: b.built })),
+        stat(t("stat_underground"), pct(b.pct_below)),
+        stat(t("stat_built_chunks"), NUM.format(b.built_chunks)),
+        stat(t("sites_h"), NUM.format(b.sites.length))),
+      h("p", { class: "folder" }, t("build_explain")),
       notCounted(b),
-      h("h3", null, "Waar"), mapBox,
-      h("h3", null, "Bouwplekken"), sitesTable,
-      h("p", { class: "folder" }, "Vink een plek aan als jullie hem bekeken hebben; dat wordt in deze browser onthouden. ",
-        "Het teleportcommando zet je 2 blokken boven het hoogste bouwblok (gebruik toeschouwersmodus als het ondergronds is)."),
-      layerProfile(b) ? [h("h3", null, "Hoogteprofiel"), layerProfile(b)] : null,
-      blocks ? [h("h3", null, "Meest gebruikte bouwblokken"), blocks] : null,
-      structs.length ? h("p", { class: "folder" }, "Gegenereerde structuren (niet meegeteld): ",
-        structs.map(([k, v]) => `${structureName(k)} (${NUM.format(v)} chunks)`).join(", "),
-        b.structure_built ? `; samen ${NUM.format(b.structure_built)} blokken.` : ".") : null,
+      h("h3", null, t("where_h")), mapBox,
+      h("h3", null, t("sites_h")), sitesTable,
+      h("p", { class: "folder" }, t("seen_note")),
+      layerProfile(b) ? [h("h3", null, t("height_profile")), layerProfile(b)] : null,
+      blocks ? [h("h3", null, t("top_blocks_h")), blocks] : null,
+      structs.length ? h("p", { class: "folder" }, t("structures_line"),
+        structs.map(([k, v]) => `${structureName(k)} (${t("n_chunks", { n: v })})`).join(", "),
+        b.structure_built ? t("structures_total", { n: b.structure_built }) : ".") : null,
     ];
   }
 
@@ -924,64 +947,62 @@
     if (!w._texts.length) return null;
     const matches = new Set(textMatches(w));
     const ordered = [...w._texts].sort((a, b) => (matches.has(b) - matches.has(a)) || (a[7] - b[7]) || a[0].localeCompare(b[0]));
-    const makers = w._texts.filter((t) => t[7]).length;
-    const rows = ordered.map((t) => {
-      const [kind, text, holder, dim, x, y, z] = t;
-      const where = x === null ? holder : `${holder} · ${dim && dim !== "minecraft:overworld" ? `${dimName(dim)} ` : ""}${x}, ${y}, ${z}`;
-      const tp = x === null ? null : `/execute in ${dim || "minecraft:overworld"} run tp @s ${x} ${y + 1} ${z}`;
-      return h("tr", { class: matches.has(t) ? "match" : null },
-        h("td", null, TEXT_KINDS[kind] || kind, t[7] ? h("div", { class: "folder" }, "van de makers") : null),
+    const makers = w._texts.filter((x) => x[7]).length;
+    const rows = ordered.map((x) => {
+      const [kind, text, holder, dim, px, py, pz] = x;
+      const where = px === null ? holder : `${holder} · ${dim && dim !== "minecraft:overworld" ? `${dimName(dim)} ` : ""}${px}, ${py}, ${pz}`;
+      const tp = px === null ? null : `/execute in ${dim || "minecraft:overworld"} run tp @s ${px} ${py + 1} ${pz}`;
+      return h("tr", { class: matches.has(x) ? "match" : null },
+        h("td", null, kindName(kind), x[7] ? h("div", { class: "folder" }, t("from_makers")) : null),
         h("td", { class: "text" }, text.length > 400 ? h("details", null, h("summary", null, snippet(text)), text) : text),
         h("td", null, where),
         h("td", null, tp ? copyButton(tp) : null));
     });
-    const table = h("table", { class: "plain texts" },
-      h("thead", null, h("tr", null, ["Soort", "Tekst", "Waar", "Teleport"].map((c) => h("th", null, c)))),
+    const tbl = h("table", { class: "plain texts" },
+      h("thead", null, h("tr", null, ["tc_kind", "tc_text", "tc_where", "tc_teleport"].map((c) => h("th", null, t(c))))),
       h("tbody", null, rows));
-    return [h("h3", null, `Teksten (${NUM.format(w._texts.length)})`),
-      matches.size ? h("p", { class: "folder" }, `${matches.size} passen bij je zoekopdracht; die staan bovenaan.`) : null,
-      makers ? h("p", { class: "folder" }, `${NUM.format(makers)} teksten staan in chunks van vóór onze spelers (de makers van de map); die tellen niet mee bij het zoeken.`) : null,
-      w._texts.length > 60 ? h("details", { open: matches.size > 0 }, h("summary", null, `Toon alle ${NUM.format(w._texts.length)} teksten`), table) : table];
+    return [h("h3", null, t("texts_h", { n: w._texts.length })),
+      matches.size ? h("p", { class: "folder" }, t("texts_match", { n: matches.size })) : null,
+      makers ? h("p", { class: "folder" }, t("texts_makers", { n: makers })) : null,
+      w._texts.length > 60 ? h("details", { open: matches.size > 0 }, h("summary", null, t("texts_all", { n: w._texts.length })), tbl) : tbl];
   }
 
-  const NOTE_DATE = new Intl.DateTimeFormat("nl-NL", { dateStyle: "medium", timeStyle: "short" });
   function noteView(w) {
     const n = w._note;
     const box = h("section", { class: "note-box" });
     const edit = () => box.replaceChildren(...noteEditor(w));
     const editButton = notesWritable
-      ? h("button", { type: "button", class: "ghost small", onclick: edit }, n ? "Bewerk notitie" : "Notitie toevoegen")
+      ? h("button", { type: "button", class: "ghost small", onclick: edit }, n ? t("edit_note") : t("add_note"))
       : null;
     if (!n) {
-      box.append(h("div", { class: "note-head" }, h("span", { class: "folder" }, notesWritable
-        ? "Nog geen notitie bij deze wereld." : "Nog geen notitie. Toevoegen kan via mcatlas serve (knop verschijnt dan hier) of mcatlas note."),
+      box.append(h("div", { class: "note-head" }, h("span", { class: "folder" }, notesWritable ? t("no_note_yet") : t("no_note_how")),
         editButton));
       return box;
     }
     box.append(
       h("div", { class: "note-head" },
-        h("div", null, h("b", null, n.title || "Notitie"), n.rating ? ` ${"★".repeat(n.rating)}` : null),
+        h("div", null, h("b", null, n.title || t("note")), n.rating ? ` ${"★".repeat(n.rating)}` : null),
         editButton),
-      n.tags.length ? h("div", { class: "badges" }, n.tags.map((t) => h("span", { class: "badge" }, t))) : null,
+      n.tags.length ? h("div", { class: "badges" }, n.tags.map((tag) => h("span", { class: "badge" }, tag))) : null,
       n.note ? h("div", { class: "note-text" }, n.note) : null,
-      n.updated ? h("div", { class: "folder" }, `Bijgewerkt ${NOTE_DATE.format(new Date(n.updated))}`) : null);
+      n.updated ? h("div", { class: "folder" }, t("note_updated", { date: NOTE_DATE.format(new Date(n.updated)) })) : null);
     return box;
   }
 
   function noteEditor(w) {
     const n = w._note || { title: "", note: "", tags: [], rating: null };
-    const title = h("input", { type: "text", value: n.title, maxlength: 200, placeholder: "Bijv. Sams treinstation" });
-    const tags = h("input", { type: "text", value: n.tags.join(", "), placeholder: "gevonden, trein" });
+    const title = h("input", { type: "text", value: n.title, maxlength: 200, placeholder: t("ph_title") });
+    const tags = h("input", { type: "text", value: n.tags.join(", "), placeholder: t("ph_tags") });
     const rating = h("select", null, h("option", { value: "" }, "–"),
       [1, 2, 3, 4, 5].map((r) => h("option", { value: r, selected: n.rating === r }, "★".repeat(r))));
-    const text = h("textarea", { rows: 6, placeholder: "Wat is dit voor wereld, wat is er bijzonder, waar ligt wat?" });
+    const text = h("textarea", { rows: 6, placeholder: t("ph_note") });
     text.value = n.note;
     const status = h("span", { class: "folder" });
     const save = h("button", { type: "button", class: "primary", onclick: async () => {
-      save.disabled = true; status.textContent = "Opslaan…";
+      save.disabled = true; status.textContent = t("saving");
       const body = {
         title: title.value.trim(), note: text.value,
-        tags: tags.value.split(",").map((t) => t.trim()).filter(Boolean),
+        tags: tags.value.split(",").map((x) => x.trim()).filter(Boolean),
         rating: rating.value ? Number(rating.value) : null,
       };
       try {
@@ -993,18 +1014,18 @@
         render();
         openDetail(w);
       } catch (e) {
-        status.textContent = `Niet opgeslagen: ${e.message}`;
+        status.textContent = t("not_saved", { msg: e.message });
         save.disabled = false;
       }
-    } }, "Opslaan");
-    const cancel = h("button", { type: "button", class: "ghost", onclick: () => openDetail(w) }, "Annuleren");
+    } }, t("save"));
+    const cancel = h("button", { type: "button", class: "ghost", onclick: () => openDetail(w) }, t("cancel"));
     return [
-      h("label", { class: "field" }, "Titel", title),
-      h("label", { class: "field" }, "Tags (met komma's)", tags),
-      h("label", { class: "field" }, "Waardering", rating),
-      h("label", { class: "field" }, "Notitie", text),
+      h("label", { class: "field" }, t("f_title"), title),
+      h("label", { class: "field" }, t("f_tags"), tags),
+      h("label", { class: "field" }, t("f_rating"), rating),
+      h("label", { class: "field" }, t("f_note"), text),
       h("div", { class: "note-actions" }, save, cancel, status),
-      h("p", { class: "folder" }, "Wordt bewaard als tekstbestand naast het archief; de werelden zelf worden niet aangeraakt."),
+      h("p", { class: "folder" }, t("note_stored")),
     ];
   }
 
@@ -1013,25 +1034,25 @@
     openWorld = w;
     const a = w.activity;
     const body = $("#detail-body");
-    const close = h("button", { class: "ghost close", type: "button", onclick: () => $("#detail").close() }, "Sluiten");
+    const close = h("button", { class: "ghost close", type: "button", onclick: closeDetail }, t("close"));
     const comps = Object.entries(w.importance.components)
-      .map(([k, v]) => `${{ days: "dagen", weeks: "weken", play_hours: "speeltijd", items_used: "items", chunks: "gebied", built: "gebouwd" }[k] || k} ${DEC.format(v)}`)
+      .map(([k, v]) => `${t(`imp_${k}`)} ${DEC.format(v)}`)
       .join(" + ");
 
     const players = w.players.length ? h("table", { class: "plain" },
-      h("thead", null, h("tr", null, ["Speler", "Speeltijd", "Sessies", "Items", "Adv.", "Modus", "Laatste positie"]
-        .map((c, i) => h("th", { class: i && i < 5 ? "num" : null }, c)))),
+      h("thead", null, h("tr", null, ["pc_player", "pc_play", "pc_sessions", "pc_items", "pc_adv", "pc_mode", "pc_position"]
+        .map((c, i) => h("th", { class: i && i < 5 ? "num" : null }, t(c))))),
       h("tbody", null, w.players.map((p) => h("tr", null,
-        h("td", { title: p.uuid }, p.name || `${p.uuid.slice(0, 8)}… (onbekend)`),
+        h("td", { title: p.uuid }, p.name || t("unknown_player", { id: p.uuid.slice(0, 8) })),
         h("td", { class: "num" }, p.play_hours ? hours(p.play_hours) : "–"),
         h("td", { class: "num" }, p.sessions ?? "–"),
         h("td", { class: "num" }, p.items_used ? NUM.format(p.items_used) : "–"),
         h("td", { class: "num" }, p.advancements || "–"),
-        h("td", null, p.game_mode !== null && p.game_mode !== undefined ? MODES[p.game_mode] : "–"),
-        h("td", null, p.position ? `${(p.dimension || "").replace("minecraft:", "")} ${p.position.map((x) => Math.round(x)).join(", ")}` : "–"))))) : h("p", { class: "folder" }, "Geen spelersgegevens.");
+        h("td", null, p.game_mode !== null && p.game_mode !== undefined ? modeName(p.game_mode) : "–"),
+        h("td", null, p.position ? `${(p.dimension || "").replace("minecraft:", "")} ${p.position.map((x) => Math.round(x)).join(", ")}` : "–"))))) : h("p", { class: "folder" }, t("no_players"));
 
     const dims = w.dimensions.length ? h("table", { class: "plain" },
-      h("thead", null, h("tr", null, h("th", null, "Dimensie"), h("th", { class: "num" }, "Chunks"), h("th", { class: "num" }, "Regio's"), h("th", null, "Gebied (blokken)"))),
+      h("thead", null, h("tr", null, h("th", null, t("dc_dimension")), h("th", { class: "num" }, t("dc_chunks")), h("th", { class: "num" }, t("dc_regions")), h("th", null, t("dc_area")))),
       h("tbody", null, w.dimensions.map((d) => h("tr", null,
         h("td", null, d.key.replace("minecraft:", "")),
         h("td", { class: "num" }, NUM.format(d.chunks)),
@@ -1043,11 +1064,11 @@
       h("td", { class: "num" }, d.sig.chunk_saves || "–"),
       h("td", { class: "num" }, d.sig.file_saves || "–"),
       h("td", { class: "num" }, d.sig.advancements || "–"),
-      h("td", null, d.sig.last_played ? "laatst gespeeld" : "")));
+      h("td", null, d.sig.last_played ? t("last_played_only") : "")));
 
     const related = w.related.length ? h("ul", null, w.related.map((r) => h("li", null,
       h("a", { class: "rel", onclick: () => { const o = byId.get(r.world_id); if (o) openDetail(o); } }, r.folder_name),
-      ` — ${Math.round(r.similarity * 100)}% gedeelde geschiedenis`))) : null;
+      ` — ${t("related_share", { p: String(Math.round(r.similarity * 100)) })}`))) : null;
 
     body.replaceChildren(...[
       h("div", { class: "detail-head" },
@@ -1060,57 +1081,68 @@
       noteView(w),
       viewsSection(w),
       h("div", { class: "stats" },
-        stat("Actieve dagen", extraDays(w) > 0 ? `${NUM.format(a.distinct_days)}–${NUM.format(w.days_upper)}` : NUM.format(a.distinct_days)),
-        stat("Periode", a.span_days ? `${NUM.format(a.span_days)} d` : "–"),
-        stat("Maanden", NUM.format(a.active_months)),
-        stat(w.foreign_players ? "Speeltijd (eigen)" : "Speeltijd", w.play_hours ? hours(w.play_hours) : "–"),
-        stat("Sessies", w.sessions ? NUM.format(w.sessions) : "–"),
-        stat("Items gebruikt", w.items_used ? NUM.format(w.items_used) : "–"),
-        stat("Chunks", NUM.format(w.chunks)),
-        stat("Grootte", bytes(w.size_bytes))),
-      h("h3", null, "Activiteit per week"),
+        stat(t("st_days"), daysRange(w)),
+        stat(t("st_period"), a.span_days ? t("st_period_value", { n: a.span_days }) : "–"),
+        stat(t("st_months"), NUM.format(a.active_months)),
+        stat(w.foreign_players ? t("st_play_own") : t("st_play"), w.play_hours ? hours(w.play_hours) : "–"),
+        stat(t("st_sessions"), w.sessions ? NUM.format(w.sessions) : "–"),
+        stat(t("st_items"), w.items_used ? NUM.format(w.items_used) : "–"),
+        stat(t("st_chunks"), NUM.format(w.chunks)),
+        stat(t("st_size"), bytes(w.size_bytes))),
+      h("h3", null, t("activity_per_week")),
       strip(w, "big-strip", 90),
       monthTicks(),
-      h("p", { class: "folder" }, `${period(w)}. Elke kolom is een week; de hoogte is het aantal actieve dagen (max. 7). `,
-        "Datums zijn een ondergrens: Minecraft bewaart per chunk alleen de laatste opslag en per advancement alleen de eerste keer.",
-        extraDays(w) > 0 ? ` Er zijn ${NUM.format(w.sessions)} sessies geteld, dus er is mogelijk op tot ${NUM.format(w.days_upper)} dagen gespeeld.` : null),
+      h("p", { class: "folder" }, t("activity_explain", { period: period(w) }), t("lower_bound"),
+        extraDays(w) > 0 ? t("sessions_upper", { s: w.sessions, d: w.days_upper }) : null),
       historyNote(w),
       buildSection(w),
       textSection(w),
-      h("h3", null, "Kenmerken"),
+      h("h3", null, t("properties_h")),
       kv([
-        ["Versie", w.version_name ? `${w.version_name}${w.data_version ? ` (data ${w.data_version})` : ""}` : null],
-        ["Spelmodus", w.game_mode !== null && w.game_mode !== undefined ? MODES[w.game_mode] : null],
-        ["Wereldtype", `${GENERATORS[w.generator] || w.generator}${w.generator_detail ? ` — ${w.generator_detail}` : ""}`],
-        ["Cheats", w.cheats === null ? null : (w.cheats ? "aan" : "uit")],
-        ["Seed", w.seed !== null && w.seed !== undefined ? String(w.seed) : null],
-        ["Laatst gespeeld", w.last_played ? DATE.format(new Date(w.last_played)) : null],
-        ["Datapacks", w.datapacks.length ? w.datapacks.join(", ") : null],
-        ["Sessieduur", w.hours_per_session ? `gemiddeld ${hours(w.hours_per_session)} per sessie${w.afk_suspect ? " — spel stond waarschijnlijk lang aan" : ""}` : null],
-        ["In-game kaarten", w.map_items || null],
-        ["Bestanden", `${NUM.format(w.files)} (${bytes(w.size_bytes)})`],
-        ["Score", `${DEC.format(w.importance.score)} = ${comps}`],
-        ["Bron", `${w.source_id}: ${w.relpath}`],
+        [t("kv_version"), w.version_name ? `${w.version_name}${w.data_version ? ` ${t("kv_data", { n: String(w.data_version) })}` : ""}` : null],
+        [t("kv_mode"), w.game_mode !== null && w.game_mode !== undefined ? modeName(w.game_mode) : null],
+        [t("kv_type"), `${generatorName(w.generator)}${w.generator_detail ? ` — ${w.generator_detail}` : ""}`],
+        [t("kv_cheats"), w.cheats === null ? null : (w.cheats ? t("on") : t("off"))],
+        [t("kv_seed"), w.seed !== null && w.seed !== undefined ? String(w.seed) : null],
+        [t("kv_last_played"), w.last_played ? DATE.format(new Date(w.last_played)) : null],
+        [t("kv_datapacks"), w.datapacks.length ? w.datapacks.join(", ") : null],
+        [t("kv_session"), w.hours_per_session ? `${t("kv_session_value", { h: hours(w.hours_per_session) })}${w.afk_suspect ? t("kv_afk") : ""}` : null],
+        [t("kv_maps"), w.map_items || null],
+        [t("kv_files"), `${NUM.format(w.files)} (${bytes(w.size_bytes)})`],
+        [t("kv_score"), `${DEC.format(w.importance.score)} = ${comps}`],
+        [t("kv_source"), `${w.source_id}: ${w.relpath}`],
       ]),
-      h("h3", null, "Spelers"), players,
-      dims ? [h("h3", null, "Dimensies"), dims] : null,
-      related ? [h("h3", null, "Verwante werelden"), related] : null,
-      w._days.length ? h("details", null, h("summary", null, `Alle ${w._days.length} actieve dagen`),
+      h("h3", null, t("players_h")), players,
+      dims ? [h("h3", null, t("dims_h")), dims] : null,
+      related ? [h("h3", null, t("related_h")), related] : null,
+      w._days.length ? h("details", null, h("summary", null, t("all_days", { n: w._days.length })),
         h("table", { class: "plain" },
-          h("thead", null, h("tr", null, h("th", null, "Dag"), h("th", { class: "num" }, "Chunks opgeslagen"),
-            h("th", { class: "num" }, "Bestanden"), h("th", { class: "num" }, "Advancements"), h("th", null, ""))),
+          h("thead", null, h("tr", null, h("th", null, t("dayc_day")), h("th", { class: "num" }, t("dayc_chunks")),
+            h("th", { class: "num" }, t("dayc_files")), h("th", { class: "num" }, t("dayc_adv")), h("th", null, ""))),
           h("tbody", null, dayRows))) : null,
-      w.errors.length ? [h("h3", null, "Meldingen bij analyse"), h("div", { class: "errors" }, w.errors.join("\n"))] : null,
+      w.errors.length ? [h("h3", null, t("errors_h")), h("div", { class: "errors" }, w.errors.join("\n"))] : null,
     ].flat(Infinity).filter((c) => c !== null && c !== undefined && c !== false));
     const dlg = $("#detail");
     if (!dlg.open) dlg.showModal();
     dlg.scrollTop = 0;
     setHash();
   }
-  $("#detail").addEventListener("close", () => { hideTip(); document.body.append(tip); setHash(); });
-  $("#detail").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+  // Tidy up after the world closes: the tooltip back to the page, the world out of the URL.
+  function afterClose() { hideTip(); document.body.append(tip); setHash(); }
+  function closeDetail() { $("#detail").close(); afterClose(); }
+  $("#detail").addEventListener("close", afterClose);  // also Esc, which closes it natively
+  $("#detail").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeDetail(); });
 
   // ---------- wiring ----------
+  $("#lang").addEventListener("change", (e) => {
+    lang = known(e.target.value) || "en";
+    try { localStorage.setItem(LANG_KEY, lang); } catch { /* storage unavailable */ }
+    setFormats();
+    applyStaticTexts();
+    fillFilters();
+    render();
+    if ($("#detail").open && openWorld) openDetail(openWorld);
+  });
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; render(); });
   $("#sort").addEventListener("change", (e) => { state.sort = e.target.value; render(); });
   $("#f-version").addEventListener("change", (e) => { state.version = e.target.value; render(); });
@@ -1142,9 +1174,13 @@
   }
   $("#t-clear").addEventListener("click", () => { setRange(null, null); setHash(); render(); });
 
+  // #from=…&to=… (older links used the Dutch #van=…&tot=…), #q=… and #w=<world id>.
   const params = new URLSearchParams(location.hash.slice(1));
-  const hashDay = (key) => (/^\d{4}-\d{2}-\d{2}$/.test(params.get(key) || "") ? parseDay(params.get(key)) : null);
-  setRange(hashDay("van"), hashDay("tot"));
+  const hashDay = (...keys) => {
+    const v = keys.map((k) => params.get(k)).find(Boolean) || "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? parseDay(v) : null;
+  };
+  setRange(hashDay("from", "van"), hashDay("to", "tot"));
   if (params.get("q")) { state.q = params.get("q"); $("#q").value = state.q; }
   render();
   loadTexts();

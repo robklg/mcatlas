@@ -1,67 +1,74 @@
 <!doctype html>
-<html lang="nl">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Werelden-atlas</title>
+  <title data-i18n="title">World atlas</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Texts come from i18n.js through data-i18n* attributes; the English here is a fallback. -->
   <header class="top">
     <div class="title">
-      <h1>Werelden-atlas</h1>
-      <p class="subtitle" id="summary">Laden…</p>
+      <h1 data-i18n="title">World atlas</h1>
+      <p class="subtitle" id="summary" data-i18n="loading">Loading…</p>
     </div>
-    <button type="button" class="ghost" id="theme-toggle" aria-label="Wissel licht/donker thema">◐</button>
+    <div class="top-actions">
+      <select id="lang" class="ghost" data-i18n-aria-label="language" aria-label="Language">
+        <option value="en">English</option>
+        <option value="nl">Nederlands</option>
+      </select>
+      <button type="button" class="ghost" id="theme-toggle" data-i18n-aria-label="theme_toggle" aria-label="Switch light/dark theme">◐</button>
+    </div>
   </header>
 
-  <section class="controls" aria-label="Zoeken en filteren">
-    <input type="search" id="q" placeholder="Zoek op naam, map, speler of blok…" autocomplete="off">
-    <label>Sorteer
+  <section class="controls" data-i18n-aria-label="controls" aria-label="Search and filter">
+    <input type="search" id="q" data-i18n-placeholder="search_placeholder" placeholder="Search by name, folder, player or block…" autocomplete="off">
+    <label><span data-i18n="sort">Sort</span>
       <select id="sort">
-        <option value="importance">Meest aan gewerkt</option>
-        <option value="last">Laatst actief</option>
-        <option value="first">Eerst actief</option>
-        <option value="days">Actieve dagen</option>
-        <option value="sessions">Sessies</option>
-        <option value="hidden">Mogelijk meer dagen</option>
-        <option value="span">Periode</option>
-        <option value="play">Speeltijd</option>
-        <option value="used">Items gebruikt</option>
-        <option value="size">Grootte</option>
-        <option value="chunks">Chunks</option>
-        <option value="built">Meest gebouwd</option>
-        <option value="below">Meest onder de grond</option>
-        <option value="inRange">Meest actief in gekozen periode</option>
-        <option value="name">Naam</option>
+        <option value="importance" data-i18n="sort_importance">Most worked on</option>
+        <option value="last" data-i18n="sort_last">Last active</option>
+        <option value="first" data-i18n="sort_first">First active</option>
+        <option value="days" data-i18n="sort_days">Active days</option>
+        <option value="sessions" data-i18n="sort_sessions">Sessions</option>
+        <option value="hidden" data-i18n="sort_hidden">Possibly more days</option>
+        <option value="span" data-i18n="sort_span">Period</option>
+        <option value="play" data-i18n="sort_play">Play time</option>
+        <option value="used" data-i18n="sort_used">Items used</option>
+        <option value="size" data-i18n="sort_size">Size</option>
+        <option value="chunks" data-i18n="sort_chunks">Chunks</option>
+        <option value="built" data-i18n="sort_built">Most built</option>
+        <option value="below" data-i18n="sort_below">Most underground</option>
+        <option value="inRange" data-i18n="sort_inRange">Most active in chosen period</option>
+        <option value="name" data-i18n="sort_name">Name</option>
       </select>
     </label>
-    <label>Versie <select id="f-version"><option value="">Alle</option></select></label>
-    <label>Spelmodus <select id="f-mode"><option value="">Alle</option></select></label>
-    <label>Speler <select id="f-player"><option value="">Iedereen</option></select></label>
-    <label>Type <select id="f-generator"><option value="">Alle</option></select></label>
-    <label>Bouw <select id="f-underground">
-      <option value="">Alles</option>
-      <option value="mostly">Vooral onder de grond (≥ 50%)</option>
-      <option value="some">Deels onder de grond (≥ 20%)</option>
-      <option value="little">Bijna alles boven de grond (&lt; 10%)</option>
+    <label><span data-i18n="version">Version</span> <select id="f-version"><option value="" data-i18n="all">All</option></select></label>
+    <label><span data-i18n="game_mode">Game mode</span> <select id="f-mode"><option value="" data-i18n="all">All</option></select></label>
+    <label><span data-i18n="player">Player</span> <select id="f-player"><option value="" data-i18n="everyone">Everyone</option></select></label>
+    <label><span data-i18n="type">Type</span> <select id="f-generator"><option value="" data-i18n="all">All</option></select></label>
+    <label><span data-i18n="building">Building</span> <select id="f-underground">
+      <option value="" data-i18n="everything">Everything</option>
+      <option value="mostly" data-i18n="ug_mostly">Mostly underground (≥ 50%)</option>
+      <option value="some" data-i18n="ug_some">Partly underground (≥ 20%)</option>
+      <option value="little" data-i18n="ug_little">Almost all above ground (&lt; 10%)</option>
     </select></label>
-    <label class="check"><input type="checkbox" id="f-copies"> Verberg kopieën</label>
-    <label class="check"><input type="checkbox" id="f-noted"> Alleen met notitie</label>
-    <label class="check" title="Werelden met activiteit van vóór onze spelers, zoals gedownloade maps"><input type="checkbox" id="f-downloaded"> Verberg gedownloade maps</label>
-    <div class="view-toggle" role="group" aria-label="Weergave">
-      <button type="button" data-view="cards" class="active">Kaarten</button>
-      <button type="button" data-view="table">Tabel</button>
+    <label class="check"><input type="checkbox" id="f-copies"> <span data-i18n="hide_copies">Hide copies</span></label>
+    <label class="check"><input type="checkbox" id="f-noted"> <span data-i18n="only_noted">Only with a note</span></label>
+    <label class="check" data-i18n-title="hide_downloaded_title" title="Worlds with activity from before our players, such as downloaded maps"><input type="checkbox" id="f-downloaded"> <span data-i18n="hide_downloaded">Hide downloaded maps</span></label>
+    <div class="view-toggle" role="group" data-i18n-aria-label="view" aria-label="View">
+      <button type="button" data-view="cards" class="active" data-i18n="cards">Cards</button>
+      <button type="button" data-view="table" data-i18n="table">Table</button>
     </div>
   </section>
 
-  <section class="timeline" aria-label="Periode kiezen">
+  <section class="timeline" data-i18n-aria-label="timeline" aria-label="Choose a period">
     <div class="timeline-head">
-      <span class="timeline-title">Wanneer</span>
-      <label>van <input type="date" id="t-from"></label>
-      <label>tot <input type="date" id="t-to"></label>
-      <button type="button" class="ghost" id="t-clear" hidden>wis periode</button>
-      <span class="timeline-hint" id="t-hint">Aantal werelden met activiteit per week. Sleep om een periode te kiezen.</span>
+      <span class="timeline-title" data-i18n="when">When</span>
+      <label><span data-i18n="from">from</span> <input type="date" id="t-from"></label>
+      <label><span data-i18n="to">to</span> <input type="date" id="t-to"></label>
+      <button type="button" class="ghost" id="t-clear" data-i18n="clear_range" hidden>clear period</button>
+      <span class="timeline-hint" id="t-hint" data-i18n="timeline_hint">Number of worlds with activity per week. Drag to choose a period.</span>
     </div>
     <div id="t-chart"></div>
   </section>
@@ -74,6 +81,7 @@
 
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 
+  <script src="i18n.js"></script>
   <script src="data/catalog.js"></script>
   <script src="data/annotations.js"></script>
   <script src="app.js"></script>

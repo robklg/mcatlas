@@ -23,6 +23,8 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+from mcatlas.core.model import Language
+
 _CONFIG_FILE: ContextVar[Path | None] = ContextVar("mcatlas_config_file", default=None)
 
 
@@ -164,6 +166,9 @@ class Settings(BaseSettings):
         env_prefix="MCATLAS_", env_nested_delimiter="__", extra="forbid"
     )
 
+    language: Language = "en"
+    """What people read: the site's default language (switchable on the site), the atlas and
+    the 3D map markers. "en" or "nl"."""
     sources: list[SourceSettings] = Field(min_length=1)
     paths: PathSettings
     players: PlayerSettings = Field(default_factory=PlayerSettings)

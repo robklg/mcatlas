@@ -2,6 +2,10 @@
 # Copy to ~/.config/mcatlas/config.toml (or ./mcatlas.toml) and adjust.
 # Every value can also be set via the environment, e.g. MCATLAS_ANALYSIS__JOBS=4.
 
+# Language of what people read: the site's default (switchable on the site itself), the
+# atlas and the 3D map markers. "en" or "nl".
+language = "en"
+
 # One or more world sources. mcatlas only ever READS below these paths;
 # mount them however you like (read-only mounts are welcome but not required).
 [[sources]]
