@@ -11,6 +11,7 @@ are the family's own files, and the pages only quote them.
 """
 
 import json
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -53,6 +54,8 @@ SCHEMA_VERSION: Final = 1
 WORLDS_DIR: Final = "worlds"
 NOTES_DIR: Final = "annotations"
 """The notes folder next to the export; the export never writes there."""
+TIMELINE: Final = "timeline"
+"""Base name of the timeline page (timeline.md, timeline.html)."""
 TEXTS: Final = "texts"
 """Base name of the texts page of a world (texts.md, texts.html)."""
 CHUNK_MAP: Final = "chunks.png"
@@ -561,6 +564,8 @@ def index_document(w: Words, catalog: Catalog, generated: date) -> Document:
                 Link("README", "README.md", "README.md"),
                 w.as_spreadsheet,
                 link("worlds.csv", "worlds.csv"),
+                w.per_month,
+                page(w.timeline_link, "", md=f"{TIMELINE}.md", html=f"{TIMELINE}.html"),
                 ".",
             ]
         ),
@@ -573,6 +578,55 @@ def index_document(w: Words, catalog: Catalog, generated: date) -> Document:
             Items([[Code(a.world), f" {a.folder} {a.title}".rstrip()] for a in orphans]),
         ]
     return Document(w.index_title, blocks)
+
+
+def timeline_document(w: Words, catalog: Catalog) -> Document:
+    """Per year: worlds × months, the number of play days in each month."""
+    by_world = {
+        e.world_id: Counter((d.year, d.month) for d in e.activity.days) for e in catalog.worlds
+    }
+    years = sorted({y for c in by_world.values() for y, _ in c})
+    tables: list[tuple[int, list[Sequence[Text]]]] = []
+    top = 0  # one shade scale for the whole page
+    blocks: list[Block] = [
+        Paragraph([page(w.all_worlds, "", md="index.md"), " · ", link("README", "README.md")]),
+        Paragraph(w.timeline_intro),
+    ]
+    for year in years:
+        played = sorted(
+            (e for e in catalog.worlds if any(y == year for y, _ in by_world[e.world_id])),
+            key=lambda e: (min(d for d in e.activity.days if d.year == year), e.name.casefold()),
+        )
+        rows: list[Sequence[Text]] = []
+        for e in played:
+            c = by_world[e.world_id]
+            months = [c.get((year, m), 0) for m in range(1, 13)]
+            rows.append(
+                [
+                    page(e.name, world_dir(e.world_id)),
+                    *(num(w, n) if n else "" for n in months),
+                    num(w, sum(months)),
+                ]
+            )
+        days = {d for e in played for d in e.activity.days if d.year == year}
+        per_month = [sum(1 for d in days if d.month == m) for m in range(1, 13)]
+        rows.append(
+            [w.timeline_all, *(num(w, n) if n else "" for n in per_month), num(w, len(days))]
+        )
+        top = max(top, *per_month)
+        tables.append((year, rows))
+    for year, rows in tables:
+        blocks += [
+            Heading(2, str(year)),
+            Table(
+                [w.timeline_world, *w.months_short, w.timeline_total],
+                rows,
+                numeric=tuple(range(1, 14)),
+                heat=tuple(range(1, 13)),
+                heat_top=top,
+            ),
+        ]
+    return Document(w.timeline_title, blocks)
 
 
 def _play_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
@@ -999,6 +1053,9 @@ def atlas_files(
     index = index_document(w, catalog, generated)
     files["index.md"] = to_markdown(index).encode()
     files["index.html"] = to_html(index, lang=language).encode()
+    timeline = timeline_document(w, catalog)
+    files[f"{TIMELINE}.md"] = to_markdown(timeline).encode()
+    files[f"{TIMELINE}.html"] = to_html(timeline, lang=language).encode()
     for e in catalog.worlds:
         base = world_dir(e.world_id)
         paths = {

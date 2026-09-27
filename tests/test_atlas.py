@@ -167,6 +167,8 @@ def test_atlas_files_are_complete_and_deterministic():
         "index.md",
         "index.html",
         "worlds.csv",
+        "timeline.md",
+        "timeline.html",
         "schema/world.schema.json",
         *(base + f for f in ("README.md", "index.html", "facts.toml", "icon.png", "site-1.png")),
         base + "texts.md",
@@ -203,6 +205,13 @@ def test_atlas_files_are_complete_and_deterministic():
     assert "Sams / geheime basis" in files[base + "texts.md"].decode()
     assert '<html lang="nl">' in files[base + "index.html"].decode()
 
+    timeline = files["timeline.md"].decode()
+    assert "## 2023" in timeline and "| Wereld | jan | feb | mrt |" in timeline
+    assert f"| [droom wereld](worlds/{WID}/README.md) |  | 1 | 1 |" in timeline
+    assert "| Speeldagen (alle werelden) |  | 1 | 1 |" in timeline
+    assert "[tijdlijn](timeline.md)" in files["index.md"].decode()
+    assert 'style="background:hsl(212 60% 35%);color:#fff"' in files["timeline.html"].decode()
+
 
 def test_atlas_in_english_has_the_same_files():
     nl, en = _files("nl"), _files("en")
@@ -218,6 +227,7 @@ def test_atlas_in_english_has_the_same_files():
     assert '<html lang="en">' in en[base + "index.html"].decode()
     assert "Notes without a world" in en["index.md"].decode()
     assert "## Updating" in en["README.md"].decode()
+    assert "| World | Jan | Feb | Mar |" in en["timeline.md"].decode()
     pages = b"".join(v for k, v in en.items() if k.endswith((".md", ".html"))).decode()
     for dutch in ("blokken", "werelden", "Plek ", "Bouwplekken", "Speeltijd", "onder de grond"):
         assert dutch not in pages, dutch

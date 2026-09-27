@@ -143,6 +143,7 @@ inside it) as plain files that stay readable without mcatlas:
 README.md             what this is, how to read the numbers and how to update it
 index.md, index.html  all worlds in one table, most played first
 worlds.csv            the same, for a spreadsheet
+timeline.md, .html    per year: worlds × months, play days in each month
 schema/world.schema.json
 worlds/<world id>/
   README.md, index.html   everything known about the world (same content twice)

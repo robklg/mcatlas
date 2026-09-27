@@ -21,6 +21,7 @@ class Words:
     thousands: str
     decimal: str
     months: tuple[str, ...]
+    months_short: tuple[str, ...]
     modes: Mapping[GameMode, str]
     generators: Mapping[str, str]
     formats: Mapping[WorldFormat, str]
@@ -51,6 +52,13 @@ class Words:
     played_between: str
     index_intro: str
     as_spreadsheet: str
+    per_month: str
+    timeline_title: str
+    timeline_link: str
+    timeline_intro: str
+    timeline_world: str
+    timeline_total: str
+    timeline_all: str
     index_header: tuple[str, ...]
     orphans_heading: str
     orphans_text: str
@@ -184,6 +192,20 @@ NL: Final = Words(
         "november",
         "december",
     ),
+    months_short=(
+        "jan",
+        "feb",
+        "mrt",
+        "apr",
+        "mei",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "okt",
+        "nov",
+        "dec",
+    ),
     modes={
         GameMode.SURVIVAL: "Overleven",
         GameMode.CREATIVE: "Creatief",
@@ -241,6 +263,17 @@ NL: Final = Words(
         "Bijgewerkt op {day}. Uitleg: "
     ),
     as_spreadsheet="; als spreadsheet: ",
+    per_month="; per maand: ",
+    timeline_title="Tijdlijn: speeldagen per maand",
+    timeline_link="tijdlijn",
+    timeline_intro=(
+        "Per jaar de werelden waarin dat jaar gespeeld is, op volgorde van de eerste speeldag, "
+        "met per maand het aantal dagen met bewijs dat er gespeeld is (een ondergrens, zie de "
+        "README). Activiteit van de makers van gedownloade maps telt niet mee."
+    ),
+    timeline_world="Wereld",
+    timeline_total="Jaar",
+    timeline_all="Speeldagen (alle werelden)",
     index_header=(
         "#",
         "Wereld",
@@ -391,6 +424,8 @@ Alles hier bestaat uit gewone bestanden die je zonder mcatlas kunt openen, ook o
 - **index.html** (in een webbrowser) of **index.md** (als tekst): alle werelden in een tabel,
   van meest naar minst gespeeld.
 - **worlds.csv**: dezelfde tabel voor een spreadsheet (UTF-8, komma-gescheiden).
+- **timeline.html** / **timeline.md**: per jaar een rooster van werelden × maanden met het
+  aantal speeldagen.
 - `worlds/<wereld>/`: per wereld een map met
   - `index.html` / `README.md`: alles wat over de wereld bekend is,
   - `facts.toml`: dezelfde feiten machineleesbaar (uitleg per veld in
@@ -471,6 +506,20 @@ EN: Final = Words(
         "November",
         "December",
     ),
+    months_short=(
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ),
     modes={
         GameMode.SURVIVAL: "Survival",
         GameMode.CREATIVE: "Creative",
@@ -527,6 +576,17 @@ EN: Final = Words(
         "{worlds}, from most to least played (importance). {period}Updated on {day}. Explanation: "
     ),
     as_spreadsheet="; as a spreadsheet: ",
+    per_month="; per month: ",
+    timeline_title="Timeline: play days per month",
+    timeline_link="timeline",
+    timeline_intro=(
+        "Per year the worlds played that year, in order of their first play day, with per "
+        "month the number of days with evidence of play (a lower bound, see the README). "
+        "Activity by the makers of downloaded maps is not counted."
+    ),
+    timeline_world="World",
+    timeline_total="Year",
+    timeline_all="Play days (all worlds)",
     index_header=(
         "#",
         "World",
@@ -676,6 +736,8 @@ Everything here is plain files you can open without mcatlas, also twenty years f
 - **index.html** (in a web browser) or **index.md** (as text): all worlds in a table, from
   most to least played.
 - **worlds.csv**: the same table for a spreadsheet (UTF-8, comma-separated).
+- **timeline.html** / **timeline.md**: per year a grid of worlds × months with the number
+  of play days.
 - `worlds/<world>/`: a folder per world with
   - `index.html` / `README.md`: everything known about the world,
   - `facts.toml`: the same facts, machine-readable (each field is explained in

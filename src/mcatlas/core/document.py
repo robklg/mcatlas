@@ -65,6 +65,10 @@ class Table:
     rows: Sequence[Sequence[Text]]
     numeric: Sequence[int] = ()
     """Columns (by index) aligned to the right."""
+    heat: Sequence[int] = ()
+    """Columns of counts that get a background in HTML, darker for larger counts."""
+    heat_top: int = 0
+    """The count that gets the darkest background; 0: the table's largest."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,9 +233,22 @@ def _html_inline(text: Text) -> str:
     return "".join(out)
 
 
-def _cell(tag: str, content: str, column: int, numeric: Sequence[int]) -> str:
+def _cell(tag: str, content: str, column: int, numeric: Sequence[int], style: str = "") -> str:
     cls = ' class="n"' if column in numeric else ""
-    return f"<{tag}{cls}>{content}</{tag}>"
+    return f"<{tag}{cls}{style}>{content}</{tag}>"
+
+
+def _count(cell: Text) -> int:
+    return int(cell) if isinstance(cell, str) and cell.isdigit() else 0
+
+
+def _heat(n: int, top: int) -> str:
+    """Blue from light to dark by share of the largest count; nothing for zero."""
+    if n <= 0 or top <= 0:
+        return ""
+    lightness = round(90 - 55 * min(n, top) / top)
+    ink = "#fff" if lightness < 55 else "#123"
+    return f' style="background:hsl(212 60% {lightness}%);color:{ink}"'
 
 
 def _html_block(block: Block) -> str:  # noqa: PLR0911 - one arm per block type
@@ -242,11 +259,23 @@ def _html_block(block: Block) -> str:  # noqa: PLR0911 - one arm per block type
             return f"<p>{_html_inline(text)}</p>"
         case Items(items):
             return "<ul>\n" + "\n".join(f"<li>{_html_inline(i)}</li>" for i in items) + "\n</ul>"
-        case Table(header, rows, numeric):
+        case Table(header, rows, numeric, heat, heat_top):
             head = "".join(_cell("th", _esc(h), i, numeric) for i, h in enumerate(header))
+            top = heat_top or max(
+                (_count(r[i]) for r in rows for i in heat if i < len(r)), default=0
+            )
             body = "\n".join(
                 "<tr>"
-                + "".join(_cell("td", _html_inline(c), i, numeric) for i, c in enumerate(row))
+                + "".join(
+                    _cell(
+                        "td",
+                        _html_inline(c),
+                        i,
+                        numeric,
+                        _heat(_count(c), top) if i in heat else "",
+                    )
+                    for i, c in enumerate(row)
+                )
                 + "</tr>"
                 for row in rows
             )
