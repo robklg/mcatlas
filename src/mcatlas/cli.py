@@ -483,16 +483,25 @@ def serve(
     can_write = settings.paths.annotations() is not None
     render_dir = settings.paths.render_dir
     web_3d = render_dir / "web" if render_dir is not None else None
+    atlas_dir = settings.paths.atlas_dir
+    # Read-only extra folders; the site links to them when they answer.
+    extra: dict[str, Path] = {}
+    if web_3d is not None:
+        extra["3d"] = web_3d
+    if atlas_dir is not None and (atlas_dir / "index.html").is_file():
+        extra["atlas"] = atlas_dir
     server = make_server(
         settings.paths.site_dir,
         host,
         port,
         on_note=on_note if can_write else None,
-        extra={"3d": web_3d} if web_3d is not None else None,
+        extra=extra,
     )
     console.print(f"Serving {settings.paths.site_dir} on http://{host}:{port}  (Ctrl-C to stop)")
     if web_3d is not None:
         console.print(f"3D maps (BlueMap) on http://{host}:{port}/3d/ from {web_3d}")
+    if "atlas" in extra:
+        console.print(f"Atlas on http://{host}:{port}/atlas/ from {atlas_dir}")
     if can_write:
         console.print(f"Notes are saved in {settings.paths.annotations()}")
     try:

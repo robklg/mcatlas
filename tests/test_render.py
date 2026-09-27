@@ -323,14 +323,16 @@ def test_missing_jar_or_client_is_explained(tmp_path: Path):
         )
 
 
-def test_serve_maps_3d_to_the_render_webroot(tmp_path: Path):
-    site, web = tmp_path / "site", tmp_path / "web"
+def test_serve_maps_3d_and_atlas_folders_read_only(tmp_path: Path):
+    site, web, atlas = tmp_path / "site", tmp_path / "web", tmp_path / "atlas"
     site.mkdir()
+    atlas.mkdir()
+    (atlas / "timeline.html").write_text("timeline")
     (web / "maps").mkdir(parents=True)
     (site / "index.html").write_text("site")
     (web / "index.html").write_text("bluemap")
     (web / "maps" / "settings.json").write_text("{}")
-    server = serve(site, "127.0.0.1", 0, extra={"3d": web})
+    server = serve(site, "127.0.0.1", 0, extra={"3d": web, "atlas": atlas})
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -346,6 +348,11 @@ def test_serve_maps_3d_to_the_render_webroot(tmp_path: Path):
         assert get("/3d/maps/settings.json") == (200, b"{}")
         assert get("/3d/../site/index.html")[0] == 404  # ".." is dropped, never outside
         assert get("/3d/%2e%2e/index.html") != (200, b"site")
+        assert get("/atlas/timeline.html") == (200, b"timeline")
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        conn.request("POST", "/atlas/timeline.html", body=b"x", headers={"X-Mcatlas": "1"})
+        assert conn.getresponse().status >= 400  # nothing but notes can be written
+        assert (atlas / "timeline.html").read_text() == "timeline"
     finally:
         server.shutdown()
         server.server_close()

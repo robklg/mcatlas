@@ -72,6 +72,8 @@ button, select, input { font: inherit; color: inherit; }
 .ghost { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
 .top-actions { display: flex; gap: 8px; align-items: center; }
 select.ghost { padding: 3px 6px; }
+a.ghost { color: inherit; text-decoration: none; }
+a.ghost[hidden] { display: none; }
 
 .controls {
   display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;

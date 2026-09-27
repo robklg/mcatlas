@@ -156,6 +156,9 @@ worlds/<world id>/
 annotations/          the notes (see below): never written by the export
 ```
 
+`mcatlas serve` also serves the exported atlas under `/atlas/`; the site then shows "Atlas" and
+"Timeline" links at the top. Opened as files, the atlas works just as well on its own.
+
 The HTML has no scripts. The pages are in the configured `language`; file names are the same in
 every language. Running it again writes only files that changed, and removes only files an
 earlier export wrote (listed in `.mcatlas-export.json`) that are no longer needed. `--check`

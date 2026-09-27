@@ -50,6 +50,12 @@
 
   // ---------- 3D maps (BlueMap); the viewer only works through `mcatlas serve` ----------
   const SERVED = location.protocol.startsWith("http");
+  // `mcatlas serve` also serves the atlas under atlas/ when it has been exported.
+  if (SERVED) {
+    fetch("atlas/index.html", { method: "HEAD" }).then((r) => {
+      if (r.ok) for (const id of ["atlas-link", "timeline-link"]) document.getElementById(id).hidden = false;
+    }, () => {});
+  }
   const rendersOf = (w) => (CATALOG.renders || {})[w.world_id] || [];
   function firstImage(w) {
     for (const m of rendersOf(w)) for (const path of Object.values(m.images)) return path;
