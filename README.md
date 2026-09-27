@@ -210,3 +210,12 @@ MCATLAS_ARCHIVE=/Volumes/share/Archive/Minecraft_worlds uv run pytest -m archive
 The read-only pipeline test builds a fixture archive (nested worlds, zip, McRegion-style edge
 cases), makes it read-only with `chmod`, runs the whole pipeline under the audit hook and asserts
 that a hashed manifest is identical before and after.
+
+## License
+
+Copyright (C) 2026 Robby klein Gunnewiek
+
+mcatlas is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. It is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; see [LICENSE](LICENSE) for details.

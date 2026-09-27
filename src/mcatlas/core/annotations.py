@@ -63,7 +63,7 @@ class Annotation(Facts):
     @field_validator("note")
     @classmethod
     def _note(cls, v: str) -> str:
-        return v.replace("\r\n", "\n").strip("\n")
+        return v.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
 
     @property
     def is_empty(self) -> bool:
