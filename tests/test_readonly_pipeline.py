@@ -190,6 +190,7 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         renderer = BlueMapRenderer(out / "render", java=fake_java(tmp_path), jar=FAKE_BLUEMAP)
         rendered = render_worlds([source], catalog.worlds, renderer, RenderOptions())
         again = render_worlds([source], catalog.worlds, renderer, RenderOptions())
+        dutch = render_worlds([source], catalog.worlds, renderer, RenderOptions(language="nl"))
         catalog, index, _ = publish_site(
             store, StaticSiteWriter(out / "site"), names, UTC, renderer=renderer
         )
@@ -215,6 +216,7 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     # Five worlds get a map; the empty folder, console and 20w14∞ worlds cannot.
     assert rendered.rendered == rendered.maps == 5 and len(rendered.skipped) == 3
     assert again.rendered == 0 and again.copied_files == 0 and again.up_to_date == again.maps
+    assert dutch.rendered == 0 and dutch.up_to_date == dutch.maps  # markers only
     seen = (out / "render" / "fake-bluemap.log").read_text().splitlines()
     assert seen and all(str(out / "render" / "worlds") in line for line in seen)
     assert not any(str(archive) in line for line in seen)
@@ -279,10 +281,10 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         "level.dat",
         "region/r.0.0.mca",
     ]
-    assert dream_map.areas[0].label == "plek 1" and dream_map.heights == {0: 70}
+    assert dream_map.areas[0].label == "Plek 1" and dream_map.heights == {0: 70}
     assert (out / "site" / dream_map.images[0]).is_file()
     doors = by_folder["DOORS"]
-    assert catalog.renders[doors.world_id][0].areas[0].label == "spawn"  # copied from the zip
+    assert catalog.renders[doors.world_id][0].areas[0].label == "Spawn"  # copied from the zip
     assert by_folder["Demo_World"].world_id not in catalog.renders
 
     # The durable atlas: plain files per world, the flat map and icon included.
@@ -290,12 +292,12 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     world_dir = out / "atlas" / "worlds" / dream.world_id
     facts = tomllib.loads((world_dir / "facts.toml").read_text())
     assert facts["schema_version"] == 1 and facts["build"]["built"] == 130
-    assert facts["build"]["sites"][0]["image"] == "plek-1.png"
-    assert (world_dir / "plek-1.png").read_bytes() == (
+    assert facts["build"]["sites"][0]["image"] == "site-1.png"
+    assert (world_dir / "site-1.png").read_bytes() == (
         out / "site" / dream_map.images[0]
     ).read_bytes()
     assert (world_dir / "icon.png").is_file()
-    assert "geheime basis" in (world_dir / "teksten.md").read_text()
+    assert "geheime basis" in (world_dir / "texts.md").read_text()
     assert "Alex en Sam" in (out / "atlas" / "index.html").read_text()
     assert not (out / "atlas" / "annotations").exists()
 

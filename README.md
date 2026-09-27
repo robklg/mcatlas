@@ -140,21 +140,25 @@ only appear when the catalog is opened that way. Requirements, in `[render]`:
 inside it) as plain files that stay readable without mcatlas:
 
 ```
-README.md             what this is and how to read the numbers (in Dutch)
+README.md             what this is, how to read the numbers and how to update it
 index.md, index.html  all worlds in one table, most played first
 worlds.csv            the same, for a spreadsheet
 schema/world.schema.json
 worlds/<world id>/
   README.md, index.html   everything known about the world (same content twice)
   facts.toml              machine-readable facts, with `schema_version`
-  teksten.md, .html       signs, books, names and commands
-  plek-<n>.png, icon.png  flat maps of the build sites (from `render`), the world icon
+  texts.md, .html         signs, books, names and commands
+  site-<n>.png, icon.png  flat maps of the build sites (from `render`), the world icon
 annotations/          the notes (see below): never written by the export
 ```
 
-The HTML has no scripts. Running it again writes only files that changed, and removes only
-files an earlier export wrote (listed in `.mcatlas-export.json`) that are no longer needed.
-`--check` runs `verify` afterwards.
+The HTML has no scripts. The pages are in the configured `language`; file names are the same in
+every language. Running it again writes only files that changed, and removes only files an
+earlier export wrote (listed in `.mcatlas-export.json`) that are no longer needed. `--check`
+runs `verify` afterwards.
+
+After changing `language`, `mcatlas render` updates only the markers of the 3D maps: the maps
+themselves are not rendered again.
 
 ## Notes (annotations)
 

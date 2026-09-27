@@ -42,61 +42,17 @@ from mcatlas.core.document import (
     to_markdown,
 )
 from mcatlas.core.facts import Facts, TextEntry
-from mcatlas.core.model import GameMode, WorldFormat, WorldId
+from mcatlas.core.model import Language, WorldFormat, WorldId
 from mcatlas.core.render import RenderedMap
+from mcatlas.core.words import WORDS, Words, count, day, hours, num
 
 SCHEMA_VERSION: Final = 1
 """Version of facts.toml and worlds.csv; bump on any incompatible change."""
 WORLDS_DIR: Final = "worlds"
 NOTES_DIR: Final = "annotations"
 """The notes folder next to the export; the export never writes there."""
-
-_MONTHS: Final = (
-    "januari", "februari", "maart", "april", "mei", "juni",
-    "juli", "augustus", "september", "oktober", "november", "december",
-)  # fmt: skip
-_MODES: Final = {
-    GameMode.SURVIVAL: "Overleven",
-    GameMode.CREATIVE: "Creatief",
-    GameMode.ADVENTURE: "Avontuur",
-    GameMode.SPECTATOR: "Toeschouwer",
-}
-_GENERATORS: Final = {
-    "default": "Normaal",
-    "flat": "Superflat",
-    "void": "Leeg (void)",
-    "amplified": "Amplified",
-    "large_biomes": "Grote biomen",
-    "single_biome": "Eén bioom",
-    "debug": "Debug",
-    "custom": "Aangepast",
-    "unknown": "Onbekend",
-}
-_FORMATS: Final = {
-    WorldFormat.MCREGION: "Oud formaat (Beta), niet diep geanalyseerd",
-    WorldFormat.NO_TERRAIN: "Geen terrein",
-    WorldFormat.NO_LEVEL_DAT: "Geen level.dat",
-    WorldFormat.EMPTY: "Lege map",
-}
-_DIMENSIONS: Final = {
-    "minecraft:overworld": "Bovenwereld",
-    "minecraft:the_nether": "Nether",
-    "minecraft:the_end": "End",
-}
-_IMPORTANCE: Final = {
-    "days": "dagen",
-    "weeks": "weken",
-    "play_hours": "speeltijd",
-    "items_used": "items",
-    "chunks": "gebied",
-    "built": "gebouwd",
-}
-_TEXT_KINDS: Final = {
-    "sign": "Bordjes",
-    "book": "Boeken",
-    "name": "Namen",
-    "command": "Commando's",
-}
+TEXTS: Final = "texts"
+"""Base name of the texts page of a world (texts.md, texts.html)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,46 +67,28 @@ class AtlasChanges:
 # ---------- formatting ----------
 
 
-def _num(n: float, decimals: int = 0) -> str:
-    """Dutch notation: 1.234,5."""
-    text = f"{n:,.{decimals}f}"
-    return text.replace(",", "_").replace(".", ",").replace("_", ".")
-
-
-def _day(d: date) -> str:
-    return f"{d.day} {_MONTHS[d.month - 1]} {d.year}"
-
-
-def _hours(h: float) -> str:
-    if h <= 0:
-        return "–"
-    if h < 1:
-        return f"{round(h * 60)} min"
-    return f"{_num(h, 1 if h < 10 else 0)} uur"
-
-
-def _count(n: int, one: str, many: str) -> str:
-    return f"{_num(n)} {one if n == 1 else many}"
-
-
-def _period(e: WorldEntry) -> str:
+def _period(w: Words, e: WorldEntry) -> str:
     a = e.activity
     if a.first_day is None or a.last_day is None:
         return "–"
     if a.first_day == a.last_day:
-        return _day(a.first_day)
-    return f"{_day(a.first_day)} – {_day(a.last_day)}"
+        return day(w, a.first_day)
+    return f"{day(w, a.first_day)} – {day(w, a.last_day)}"
 
 
-def _days(e: WorldEntry) -> str:
+def _days(w: Words, e: WorldEntry) -> str:
     low = e.activity.distinct_days
     if e.days_upper is not None and e.days_upper > low:
-        return f"{_num(low)}–{_num(e.days_upper)}"
-    return _num(low)
+        return f"{num(w, low)}–{num(w, e.days_upper)}"
+    return num(w, low)
 
 
-def _dimension(key: str) -> str:
-    return _DIMENSIONS.get(key, key)
+def _pct(w: Words, pct: float | None) -> str:
+    return f"{num(w, pct)}%" if pct is not None else "–"
+
+
+def _dimension(w: Words, key: str) -> str:
+    return w.dimensions.get(key, key)
 
 
 def _block(name: str) -> str:
@@ -307,7 +245,7 @@ def _site_images(renders: Sequence[RenderedMap]) -> dict[int | None, str]:
 
 
 def image_name(site: int | None) -> str:
-    return "spawn.png" if site is None else f"plek-{site + 1}.png"
+    return "spawn.png" if site is None else f"site-{site + 1}.png"
 
 
 def atlas_world(e: WorldEntry, images: Mapping[int | None, str]) -> AtlasWorld:
@@ -498,7 +436,7 @@ def _players_line(e: WorldEntry) -> str:
     return ", ".join(p.name or p.uuid[:8] for p in e.players if p.play_hours > 0 and p.known)
 
 
-def index_document(catalog: Catalog, generated: date) -> Document:
+def index_document(w: Words, catalog: Catalog, generated: date) -> Document:
     rows: list[Sequence[Text]] = []
     for n, e in enumerate(catalog.worlds, 1):
         b = e.build
@@ -506,147 +444,118 @@ def index_document(catalog: Catalog, generated: date) -> Document:
             [
                 str(n),
                 page(e.name, world_dir(e.world_id)),
-                _period(e),
-                _days(e),
-                _hours(e.play_hours),
-                _num(b.built) if b else "–",
-                f"{_num(b.pct_below, 0)}%" if b and b.pct_below is not None else "–",
+                _period(w, e),
+                _days(w, e),
+                hours(w, e.play_hours),
+                num(w, b.built) if b else "–",
+                _pct(w, b.pct_below) if b else "–",
                 _players_line(e),
                 _note_line(e.annotation),
             ]
         )
     present = {e.world_id for e in catalog.worlds}
     orphans = sorted(
-        (a for w, a in catalog.annotations.items() if w not in present), key=lambda a: a.world
+        (a for wid, a in catalog.annotations.items() if wid not in present),
+        key=lambda a: a.world,
     )
     period = (
-        f"Gespeeld tussen {_day(catalog.first_day)} en {_day(catalog.last_day)}. "
+        w.played_between.format(first=day(w, catalog.first_day), last=day(w, catalog.last_day))
         if catalog.first_day and catalog.last_day
         else ""
+    )
+    intro = w.index_intro.format(
+        worlds=count(w, len(catalog.worlds), w.worlds), period=period, day=day(w, generated)
     )
     blocks: list[Block] = [
         Paragraph(
             [
-                f"{_count(len(catalog.worlds), 'wereld', 'werelden')}, van meest naar minst "
-                f"gespeeld (belangrijkheid). {period}Bijgewerkt op {_day(generated)}. Uitleg: ",
+                intro,
                 Link("README", "README.md", "README.md"),
-                "; als spreadsheet: ",
+                w.as_spreadsheet,
                 link("worlds.csv", "worlds.csv"),
                 ".",
             ]
         ),
-        Table(
-            [
-                "#",
-                "Wereld",
-                "Periode",
-                "Dagen",
-                "Speeltijd",
-                "Gebouwd",
-                "Ondergronds",
-                "Spelers",
-                "Notitie",
-            ],
-            rows,
-            numeric=(0, 3, 4, 5, 6),
-        ),
+        Table(list(w.index_header), rows, numeric=(0, 3, 4, 5, 6)),
     ]
     if orphans:
         blocks += [
-            Heading(2, "Notities zonder wereld"),
-            Paragraph(
-                f"Deze notities in {NOTES_DIR}/ horen bij werelden die niet meer in het "
-                "archief staan:"
-            ),
+            Heading(2, w.orphans_heading),
+            Paragraph(w.orphans_text.format(dir=NOTES_DIR)),
             Items([[Code(a.world), f" {a.folder} {a.title}".rstrip()] for a in orphans]),
         ]
-    return Document("Minecraft-werelden", blocks)
+    return Document(w.index_title, blocks)
 
 
-def _play_rows(e: WorldEntry) -> list[tuple[str, Text]]:
+def _play_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
     a, b = e.activity, e.build
     rows: list[tuple[str, Text]] = []
     if e.format is not WorldFormat.ANVIL:
-        rows.append(("Soort", _FORMATS.get(e.format, e.format.value)))
-    rows.append(
-        (
-            "Periode",
-            _period(e) + (f" ({_count(a.span_days, 'dag', 'dagen')})" if a.span_days > 1 else ""),
-        )
+        rows.append((w.kind, w.formats.get(e.format, e.format.value)))
+    span = f" ({count(w, a.span_days, w.days)})" if a.span_days > 1 else ""
+    rows.append((w.period, _period(w, e) + span))
+    months = (
+        w.in_months.format(months=count(w, a.active_months, w.months_count))
+        if a.active_months > 1
+        else ""
     )
-    rows.append(
-        (
-            "Actieve dagen",
-            _days(e)
-            + (f" in {_count(a.active_months, 'maand', 'maanden')}" if a.active_months > 1 else ""),
-        )
-    )
-    play = _hours(e.play_hours)
+    rows.append((w.active_days, _days(w, e) + months))
+    play = hours(w, e.play_hours)
     if e.foreign_players:
-        play += f" (eigen spelers; alle spelers samen {_hours(e.play_hours_all)})"
+        play += w.own_players.format(hours=hours(w, e.play_hours_all))
     if e.sessions:
-        play += f", {_count(e.sessions, 'sessie', 'sessies')}"
+        play += f", {count(w, e.sessions, w.sessions)}"
     if e.afk_suspect:
-        play += "; waarschijnlijk vaak aan laten staan"
-    rows.append(("Speeltijd", play))
+        play += w.left_running
+    rows.append((w.play_time, play))
     if e.items_used:
-        rows.append(("Items gebruikt", f"{_num(e.items_used)} (inclusief elk geplaatst blok)"))
+        rows.append((w.items_used, w.items_used_value.format(n=num(w, e.items_used))))
     if b is not None:
-        built = _count(b.built, "blok", "blokken")
+        built = count(w, b.built, w.blocks)
         if b.pct_below is not None:
-            built += f", {_num(b.pct_below, 0)}% onder de grond"
-        rows.append(("Gebouwd", built))
+            built += ", " + w.below.format(pct=num(w, b.pct_below))
+        rows.append((w.built, built))
         if b.history_built:
-            rows.append(
-                ("Van de makers", f"{_num(b.history_built)} blokken (van vóór onze spelers)")
-            )
+            rows.append((w.by_makers, w.by_makers_value.format(n=num(w, b.history_built))))
     return rows
 
 
-def _world_rows(e: WorldEntry) -> list[tuple[str, Text]]:
+def _world_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
     rows: list[tuple[str, Text]] = []
-    rows.append(
-        (
-            "Verkend",
-            f"{_num(e.chunks)} chunks"
-            + (" in " + ", ".join(_dimension(d.key) for d in e.dimensions) if e.dimensions else ""),
-        )
-    )
+    where = ", ".join(_dimension(w, d.key) for d in e.dimensions)
+    rows.append((w.explored, f"{num(w, e.chunks)} chunks" + (f" in {where}" if where else "")))
     if e.version_name:
-        rows.append(("Versie", e.version_name))
+        rows.append((w.version, e.version_name))
     if e.game_mode is not None:
-        mode = _MODES[e.game_mode] + (", hardcore" if e.hardcore else "")
-        rows.append(("Spelmodus", mode + (", cheats aan" if e.cheats else "")))
-    generator = _GENERATORS.get(e.generator.value, e.generator.value)
+        mode = w.modes[e.game_mode] + (", hardcore" if e.hardcore else "")
+        rows.append((w.game_mode, mode + (f", {w.cheats_on}" if e.cheats else "")))
+    generator = w.generators.get(e.generator.value, e.generator.value)
     if e.generator_detail:
         generator += f" ({e.generator_detail})"
-    rows.append(("Wereldtype", generator))
+    rows.append((w.world_type, generator))
     if e.modded:
-        rows.append(("Mods", "ja"))
+        rows.append((w.mods, w.yes))
     if e.datapacks:
-        rows.append(("Datapacks", ", ".join(e.datapacks)))
+        rows.append((w.datapacks, ", ".join(e.datapacks)))
     if e.seed is not None:
         rows.append(("Seed", Code(str(e.seed))))
     if e.spawn is not None:
         rows.append(("Spawn", Code(" ".join(str(c) for c in e.spawn))))
     if e.last_played is not None:
-        rows.append(("Laatst geopend", _day(e.last_played.date())))
-    rows.append(
-        (
-            "Grootte",
-            f"{_num(e.size_bytes / 1_048_576, 1)} MB in {_count(e.files, 'bestand', 'bestanden')}",
-        )
+        rows.append((w.last_opened, day(w, e.last_played.date())))
+    size = w.size_value.format(
+        mb=num(w, e.size_bytes / 1_048_576, 1), files=count(w, e.files, w.files)
     )
+    rows.append((w.size, size))
     parts = ", ".join(
-        f"{_IMPORTANCE.get(k, k)} {_num(v, 1)}" for k, v in e.importance.components.items() if v
+        f"{w.importance.get(k, k)} {num(w, v, 1)}" for k, v in e.importance.components.items() if v
     )
-    rows.append(
-        ("Belangrijkheid", f"{_num(e.importance.score, 1)}" + (f" ({parts})" if parts else ""))
-    )
+    score = num(w, e.importance.score, 1) + (f" ({parts})" if parts else "")
+    rows.append((w.importance_label, score))
     return rows
 
 
-def _players(e: WorldEntry) -> list[Block]:
+def _players(w: Words, e: WorldEntry) -> list[Block]:
     shown = [p for p in e.players if p.play_hours > 0 or p.known]
     if not shown:
         return []
@@ -655,29 +564,25 @@ def _players(e: WorldEntry) -> list[Block]:
         where = ""
         if p.position is not None:
             x, y, z = (round(c) for c in p.position)
-            where = f"{_dimension(p.dimension or '')} {x} {y} {z}".strip()
+            where = f"{_dimension(w, p.dimension or '')} {x} {y} {z}".strip()
         rows.append(
             [
                 p.name or Code(p.uuid),
-                _hours(p.play_hours),
-                _num(p.sessions) if p.sessions is not None else "–",
-                _num(p.items_used),
-                _num(p.advancements),
-                _MODES[p.game_mode] if p.game_mode is not None else "",
+                hours(w, p.play_hours),
+                num(w, p.sessions) if p.sessions is not None else "–",
+                num(w, p.items_used),
+                num(w, p.advancements),
+                w.modes[p.game_mode] if p.game_mode is not None else "",
                 where,
             ]
         )
     return [
-        Heading(2, "Spelers"),
-        Table(
-            ["Speler", "Speeltijd", "Sessies", "Items", "Advancements", "Modus", "Laatste positie"],
-            rows,
-            numeric=(1, 2, 3, 4),
-        ),
+        Heading(2, w.players_heading),
+        Table(list(w.players_header), rows, numeric=(1, 2, 3, 4)),
     ]
 
 
-def _sites(e: WorldEntry, images: Mapping[int | None, str]) -> list[Block]:
+def _sites(w: Words, e: WorldEntry, images: Mapping[int | None, str]) -> list[Block]:
     b = e.build
     if b is None:
         return []
@@ -688,146 +593,110 @@ def _sites(e: WorldEntry, images: Mapping[int | None, str]) -> list[Block]:
             rows.append(
                 [
                     str(i + 1),
-                    _dimension(s.dimension),
+                    _dimension(w, s.dimension),
                     Code(f"{s.x} {s.z}"),
                     f"{s.bbox[2] - s.bbox[0] + 1} × {s.bbox[3] - s.bbox[1] + 1}",
-                    f"{s.min_y} tot {s.max_y}",
-                    _num(s.built),
-                    f"{_num(s.pct_below, 0)}%" if s.pct_below is not None else "–",
-                    _hours(s.hours_nearby),
+                    w.height_range.format(low=s.min_y, high=s.max_y),
+                    num(w, s.built),
+                    _pct(w, s.pct_below),
+                    hours(w, s.hours_nearby),
                     Code(_tp(s)),
                 ]
             )
         blocks += [
-            Heading(2, "Bouwplekken"),
-            Paragraph(
-                "Plekken waar gebouwd is, groot naar klein. Midden = x en z in blokken; de "
-                "teleport-opdracht werkt in een kopie van de wereld met cheats aan."
-            ),
-            Table(
-                [
-                    "#",
-                    "Dimensie",
-                    "Midden",
-                    "Gebied",
-                    "Hoogte",
-                    "Blokken",
-                    "Ondergronds",
-                    "In de buurt",
-                    "Teleport",
-                ],
-                rows,
-                numeric=(0, 5, 6, 7),
-            ),
+            Heading(2, w.sites_heading),
+            Paragraph(w.sites_text),
+            Table(list(w.sites_header), rows, numeric=(0, 5, 6, 7)),
         ]
     for i, s in enumerate(b.sites):
         if i in images:
-            blocks.append(
-                Image(
-                    image_name(i),
-                    f"Plek {i + 1} van bovenaf",
-                    f"Plek {i + 1} ({_dimension(s.dimension)}, rond {s.x} {s.z}) van bovenaf, "
-                    "noorden boven.",
-                )
+            caption = w.site_caption.format(
+                n=i + 1, dimension=_dimension(w, s.dimension), x=s.x, z=s.z
             )
+            blocks.append(Image(image_name(i), w.site_alt.format(n=i + 1), caption))
     if None in images:
-        spawn = f" rond {e.spawn[0]} {e.spawn[2]}" if e.spawn else ""
-        blocks.append(
-            Image(image_name(None), "Spawn van bovenaf", f"Het gebied{spawn} van bovenaf.")
-        )
+        around = w.around.format(x=e.spawn[0], z=e.spawn[2]) if e.spawn else ""
+        blocks.append(Image(image_name(None), w.spawn_alt, w.spawn_caption.format(around=around)))
     if b.top_blocks:
         blocks += [
-            Heading(2, "Meest gebouwde blokken"),
+            Heading(2, w.top_blocks),
             Table(
-                ["Blok", "Aantal"],
-                [[_block(name), _num(n)] for name, n in b.top_blocks],
+                list(w.top_blocks_header),
+                [[_block(name), num(w, n)] for name, n in b.top_blocks],
                 numeric=(1,),
             ),
         ]
     return blocks
 
 
-def _timeline(e: WorldEntry) -> list[Block]:
+def _timeline(w: Words, e: WorldEntry) -> list[Block]:
     def months(days: Sequence[date]) -> list[Text]:
         by_month: dict[tuple[int, int], list[int]] = {}
         for d in sorted(days):
             by_month.setdefault((d.year, d.month), []).append(d.day)
         return [
-            f"{_MONTHS[m - 1]} {y}: {', '.join(str(d) for d in ds)} "
-            f"({_count(len(ds), 'dag', 'dagen')})"
+            f"{w.months[m - 1]} {y}: {', '.join(str(d) for d in ds)} ({count(w, len(ds), w.days)})"
             for (y, m), ds in by_month.items()
         ]
 
     blocks: list[Block] = []
     if e.activity.days:
         blocks += [
-            Heading(2, "Tijdlijn"),
-            Paragraph(
-                "Dagen met bewijs dat er gespeeld is (opgeslagen chunks, advancements, "
-                "bestanden). Het echte aantal ligt hoger: van elk stukje wereld onthoudt "
-                "Minecraft alleen de laatste keer opslaan."
-            ),
+            Heading(2, w.timeline),
+            Paragraph(w.timeline_text),
             Items(months(list(e.activity.days))),
         ]
     if e.activity.history:
         blocks += [
-            Heading(3, "Voorgeschiedenis"),
-            Paragraph(
-                "Activiteit van vóór onze spelers, bijvoorbeeld van de makers van een "
-                "gedownloade map:"
-            ),
+            Heading(3, w.history),
+            Paragraph(w.history_text),
             Items(months(list(e.activity.history))),
         ]
     return blocks
 
 
-def _note(note: Annotation | None) -> list[Block]:
+def _note(w: Words, note: Annotation | None) -> list[Block]:
     if note is None or note.is_empty:
         return []
-    blocks: list[Block] = [Heading(2, "Onze notitie")]
+    blocks: list[Block] = [Heading(2, w.note_heading)]
     line = _note_line(note)
     if line:
         blocks.append(Paragraph(line))
     if note.note.strip():
         blocks.append(Markdown(note.note))
-    blocks.append(
-        Paragraph(f"(Uit {NOTES_DIR}/, waar de notities zelf staan en bewerkt kunnen worden.)")
-    )
+    blocks.append(Paragraph(w.note_source.format(dir=NOTES_DIR)))
     return blocks
 
 
-def _texts_line(e: WorldEntry) -> list[Block]:
+def _texts_line(w: Words, e: WorldEntry) -> list[Block]:
     if not e.text_counts:
         return []
     counts = ", ".join(
-        f"{_TEXT_KINDS.get(k, k).lower()} {_num(n)}" for k, n in sorted(e.text_counts.items())
+        f"{w.text_kinds.get(k, k).lower()} {num(w, n)}" for k, n in sorted(e.text_counts.items())
     )
     return [
-        Heading(2, "Teksten"),
+        Heading(2, w.texts_heading),
         Paragraph(
             [
-                f"Gevonden: {counts}. Alles staat in ",
-                page("teksten", "", md="teksten.md", html="teksten.html"),
+                w.texts_found.format(counts=counts),
+                page(w.texts_link, "", md=f"{TEXTS}.md", html=f"{TEXTS}.html"),
                 ".",
             ]
         ),
     ]
 
 
-def _related(e: WorldEntry) -> list[Block]:
+def _related(w: Words, e: WorldEntry) -> list[Block]:
     if not e.related:
         return []
     return [
-        Heading(2, "Verwante werelden"),
-        Paragraph(
-            "Werelden met deels dezelfde geschiedenis (kopieën van elkaar of van dezelfde "
-            "oorsprong):"
-        ),
+        Heading(2, w.related),
+        Paragraph(w.related_text),
         Items(
             [
                 [
                     page(r.folder_name, f"../{r.world_id}/"),
-                    f" ({_num(100 * r.similarity, 0)}% overeenkomst)",
+                    w.similarity.format(pct=num(w, 100 * r.similarity)),
                 ]
                 for r in e.related
             ]
@@ -835,157 +704,96 @@ def _related(e: WorldEntry) -> list[Block]:
     ]
 
 
-def world_document(e: WorldEntry, images: Mapping[int | None, str], *, has_icon: bool) -> Document:
-    where: list[Inline] = ["Map in het archief: ", Code(e.relpath)]
+def world_document(
+    w: Words, e: WorldEntry, images: Mapping[int | None, str], *, has_icon: bool
+) -> Document:
+    where: list[Inline] = [w.in_archive, Code(e.relpath)]
     if e.folder_name != e.name:
-        where = [*where, f" (mapnaam {e.folder_name})"]
+        where = [*where, w.folder_name.format(folder=e.folder_name)]
     blocks: list[Block] = [
         Paragraph(
             [
-                page("← alle werelden", "../../", md="index.md"),
+                page(w.all_worlds, "../../", md="index.md"),
                 " · ",
-                link("feiten (facts.toml)", "facts.toml"),
+                link(w.facts_link, "facts.toml"),
             ]
         ),
         Paragraph(where),
     ]
     if has_icon:
-        blocks.append(Image("icon.png", "Plaatje van de wereld"))
-    blocks += _note(e.annotation)
+        blocks.append(Image("icon.png", w.icon_alt))
+    blocks += _note(w, e.annotation)
     blocks += [
-        Heading(2, "Samenvatting"),
-        Table(["", ""], [list(r) for r in _play_rows(e) + _world_rows(e)]),
+        Heading(2, w.summary),
+        Table(["", ""], [list(r) for r in _play_rows(w, e) + _world_rows(w, e)]),
     ]
-    blocks += _sites(e, images)
-    blocks += _players(e)
-    blocks += _timeline(e)
-    blocks += _texts_line(e)
-    blocks += _related(e)
+    blocks += _sites(w, e, images)
+    blocks += _players(w, e)
+    blocks += _timeline(w, e)
+    blocks += _texts_line(w, e)
+    blocks += _related(w, e)
     if e.errors:
-        blocks += [Heading(2, "Meldingen bij het analyseren"), Items(e.errors)]
+        blocks += [Heading(2, w.problems), Items(e.errors)]
     return Document(e.name, blocks)
 
 
-def _where(t: TextEntry) -> Text:
+def _where(w: Words, t: TextEntry) -> Text:
     if t.x is None or t.y is None or t.z is None:
         return ""
     dim = (
-        f"{_dimension(t.dimension)} "
+        f"{_dimension(w, t.dimension)} "
         if t.dimension and t.dimension != "minecraft:overworld"
         else ""
     )
     return [dim, Code(f"{t.x} {t.y} {t.z}")]
 
 
-def texts_document(e: WorldEntry, texts: Sequence[TextEntry]) -> Document:
+def texts_document(w: Words, e: WorldEntry, texts: Sequence[TextEntry]) -> Document:
     blocks: list[Block] = [
         Paragraph([page(f"← {e.name}", "", md="README.md", html="index.html")]),
-        Paragraph(
-            "Teksten die spelers in de wereld hebben achtergelaten: op bordjes, in boeken, als "
-            "naam van dieren en spullen, en in command blocks."
-        ),
+        Paragraph(w.texts_intro),
     ]
     for history in (False, True):
         group = [t for t in texts if t.history == history]
         if not group:
             continue
         if history:
-            blocks += [
-                Heading(2, "Van vóór onze spelers"),
-                Paragraph(
-                    "Deze teksten staan in stukken wereld die al zo waren toen onze "
-                    "spelers begonnen (bijvoorbeeld van de makers van een map)."
-                ),
-            ]
+            blocks += [Heading(2, w.texts_history), Paragraph(w.texts_history_text)]
         level = 3 if history else 2
-        for kind, label in _TEXT_KINDS.items():
+        for kind, label in w.text_kinds.items():
             of_kind = [t for t in group if t.kind == kind]
             if not of_kind:
                 continue
-            blocks.append(Heading(level, f"{label} ({_num(len(of_kind))})"))
+            blocks.append(Heading(level, f"{label} ({num(w, len(of_kind))})"))
             if kind == "book":
                 for t in of_kind:
-                    blocks += [Paragraph([f"In {t.holder} ", *_as_list(_where(t))]), Pre(t.text)]
+                    held = w.book_in.format(holder=t.holder)
+                    blocks += [Paragraph([held, *_as_list(_where(w, t))]), Pre(t.text)]
             else:
                 blocks.append(
                     Table(
-                        ["Tekst", "Op of in", "Plaats"],
+                        list(w.texts_header),
                         [
-                            [Code(t.text) if kind == "command" else t.text, t.holder, _where(t)]
+                            [Code(t.text) if kind == "command" else t.text, t.holder, _where(w, t)]
                             for t in of_kind
                         ],
                     )
                 )
-    return Document(f"Teksten in {e.name}", blocks)
+    return Document(w.texts_title.format(name=e.name), blocks)
 
 
 def _as_list(text: Text) -> list[Inline]:
     return [text] if isinstance(text, str | Link | Code) else list(text)
 
 
-README: Final = """\
-Dit is een overzicht van een archief met Minecraft-werelden (bij elke wereld staat in welke
-map van het archief hij zit). Het is gemaakt door *mcatlas*, een programma dat de werelden alleen
-leest (nooit wijzigt) en uitzoekt wanneer, hoe lang, door wie en wat er in elke wereld gebouwd is.
-
-Alles hier bestaat uit gewone bestanden die je zonder mcatlas kunt openen, ook over twintig jaar:
-
-- **index.html** (in een webbrowser) of **index.md** (als tekst): alle werelden in een tabel,
-  van meest naar minst gespeeld.
-- **worlds.csv**: dezelfde tabel voor een spreadsheet (UTF-8, komma-gescheiden).
-- `worlds/<wereld>/`: per wereld een map met
-  - `index.html` / `README.md`: alles wat over de wereld bekend is,
-  - `facts.toml`: dezelfde feiten machineleesbaar (uitleg per veld in
-    `schema/world.schema.json`),
-  - `teksten.html` / `teksten.md`: bordjes, boeken, namen en commando's uit de wereld,
-  - `plek-1.png`, `plek-2.png`, ...: de bouwplekken van bovenaf (noorden boven, 1 pixel is
-    1 of meer blokken), `icon.png`: het plaatje van de wereld uit het Minecraft-menu.
-- **annotations/**: onze eigen notities per wereld (Markdown). mcatlas overschrijft die nooit;
-  de pagina's hier citeren ze alleen.
-
-## Hoe je de getallen leest
-
-- **Actieve dagen**: dagen waarop aantoonbaar gespeeld is. Minecraft onthoudt van elk stukje
-  wereld alleen de laatste keer opslaan, dus dit is een ondergrens. Het getal erachter (bijv.
-  `8–15`) is een bovengrens: het aantal keer dat het spel is afgesloten.
-- **Speeltijd**: uit de statistieken van de spelers zelf; "eigen spelers" zijn de spelers met
-  een bekende naam, anderen (vrienden, makers van een map) staan apart.
-- **Gebouwd**: blokken die Minecraft zelf nooit neerzet (dus geen steen, aarde, bomen), ongeveer
-  het aantal kubieke meters dat gebouwd is. Bouwen met natuurlijke blokken telt niet mee.
-- **Ondergronds**: het deel van het gebouwde onder het natuurlijke maaiveld.
-- **Bouwplekken**: groepjes chunks (16×16 blokken) waarin gebouwd is, met coördinaten.
-- **Belangrijkheid**: één getal dat dagen, weken, speeltijd, items, gebied en bouwen optelt
-  (elk logaritmisch), alleen om te sorteren.
-
-## Bijwerken
-
-Deze map wordt niet vanzelf bijgewerkt. Na een nieuwe notitie of nieuwe werelden in het archief
-draai je mcatlas opnieuw (in de map van het mcatlas-project):
-
-```sh
-uv run mcatlas analyze --tier 2   # alleen bij nieuwe of veranderde werelden
-uv run mcatlas render             # alleen bij nieuwe werelden: kaartjes van bovenaf
-uv run mcatlas export-atlas       # deze map bijwerken
-```
-
-Alleen gewijzigde bestanden worden opnieuw geschreven. De map `annotations/` blijft altijd
-onaangeroerd.
-
-## Een wereld weer spelen
-
-Kopieer de wereldmap uit het archief naar de `saves`-map van Minecraft (Java Edition) en
-open de kopie. Speel nooit in het archief zelf: Minecraft verandert een wereld zodra je hem
-opent.
-"""
-
-
-def readme_document(catalog: Catalog, generated: date, tool: str) -> str:
-    head = (
-        "# Minecraft-werelden: atlas\n\n"
-        f"Gemaakt op {_day(generated)} door {tool}, schema-versie {SCHEMA_VERSION}, "
-        f"{_count(len(catalog.worlds), 'wereld', 'werelden')}.\n\n"
+def readme_document(w: Words, catalog: Catalog, generated: date, tool: str) -> str:
+    made = w.readme_made.format(
+        day=day(w, generated),
+        tool=tool,
+        schema=SCHEMA_VERSION,
+        worlds=count(w, len(catalog.worlds), w.worlds),
     )
-    return head + README
+    return f"# {w.readme_title}\n\n{made}\n\n{w.readme}"
 
 
 # ---------- all files ----------
@@ -998,16 +806,22 @@ def atlas_files(
     images: Mapping[str, bytes],
     generated: date,
     tool: str,
+    language: Language = "en",
 ) -> dict[str, bytes]:
-    """Every file of the atlas by relative path. `images` are flat maps by render path."""
+    """Every file of the atlas by relative path. `images` are flat maps by render path.
+
+    File names are the same in every language, so a change of language rewrites the pages
+    but leaves no files of the other language behind.
+    """
+    w = WORDS[language]
     files: dict[str, bytes] = {
-        "README.md": readme_document(catalog, generated, tool).encode(),
+        "README.md": readme_document(w, catalog, generated, tool).encode(),
         "worlds.csv": worlds_csv(catalog.worlds).encode(),
         "schema/world.schema.json": world_schema().encode(),
     }
-    index = index_document(catalog, generated)
+    index = index_document(w, catalog, generated)
     files["index.md"] = to_markdown(index).encode()
-    files["index.html"] = to_html(index).encode()
+    files["index.html"] = to_html(index, lang=language).encode()
     for e in catalog.worlds:
         base = world_dir(e.world_id)
         paths = {
@@ -1016,9 +830,9 @@ def atlas_files(
             if path in images
         }
         icon = icons.get(e.world_id)
-        doc = world_document(e, paths, has_icon=icon is not None)
+        doc = world_document(w, e, paths, has_icon=icon is not None)
         files[base + "README.md"] = to_markdown(doc).encode()
-        files[base + "index.html"] = to_html(doc).encode()
+        files[base + "index.html"] = to_html(doc, lang=language).encode()
         files[base + "facts.toml"] = facts_toml(atlas_world(e, paths)).encode()
         if icon is not None:
             files[base + "icon.png"] = icon
@@ -1026,7 +840,7 @@ def atlas_files(
             files[base + image_name(site)] = images[path]
         texts = catalog.texts.get(e.world_id, [])
         if texts:
-            tdoc = texts_document(e, texts)
-            files[base + "teksten.md"] = to_markdown(tdoc).encode()
-            files[base + "teksten.html"] = to_html(tdoc).encode()
+            tdoc = texts_document(w, e, texts)
+            files[base + f"{TEXTS}.md"] = to_markdown(tdoc).encode()
+            files[base + f"{TEXTS}.html"] = to_html(tdoc, lang=language).encode()
     return files

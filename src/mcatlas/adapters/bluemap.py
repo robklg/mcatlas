@@ -13,6 +13,7 @@ All writes go through the output guard. BlueMap's metrics reporting is switched 
 """
 
 import contextlib
+import html
 import io
 import json
 import os
@@ -101,8 +102,8 @@ def _marker(area: RenderArea, height: int | None) -> dict[str, object]:
     y = (height if height is not None else area.y) + 1
     return {
         "type": "poi",
-        "label": area.label.capitalize(),
-        "detail": f"<b>{area.label.capitalize()}</b><br>{area.detail}",
+        "label": area.label,
+        "detail": f"<b>{html.escape(area.label)}</b><br>{html.escape(area.detail)}",
         "position": {"x": area.x + 0.5, "y": y, "z": area.z + 0.5},
         "max-distance": 100_000,
     }
@@ -300,7 +301,7 @@ class BlueMapRenderer:
             "storage": "file",
             "marker-sets": {
                 "mcatlas": {
-                    "label": "Bouwplekken",
+                    "label": plan.marker_set,
                     "toggleable": True,
                     "default-hidden": False,
                     "markers": {
@@ -439,10 +440,22 @@ class BlueMapRenderer:
                 index[map_id] = result
                 done.append(result)
             self._save_index(list(index.values()))
-        if done:
+        # Maps whose texts changed (another language) but not their tiles: new markers only.
+        relabelled = [
+            map_id
+            for map_id, before in index.items()
+            if map_id not in todo
+            and MapPlan.model_validate(before.model_dump(include=set(MapPlan.model_fields)))
+            != planned[map_id]
+        ]
+        for map_id in relabelled:
+            index[map_id] = RenderedMap.model_validate(
+                index[map_id].model_dump() | planned[map_id].model_dump()
+            )
+        if done or relabelled:
             # Markers were configured before the heights were known; put them on the ground.
             self._write_config(plans, {i: m.heights for i, m in index.items()})
-            self._run(self._command("--markers", [m.map_id for m in done], version), progress)
-        else:
-            self._save_index(list(index.values()))
+            markers = [m.map_id for m in done] + relabelled
+            self._run(self._command("--markers", markers, version), progress)
+        self._save_index(list(index.values()))
         return done

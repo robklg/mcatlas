@@ -28,7 +28,7 @@ from mcatlas.core.document import (
     to_markdown,
 )
 from mcatlas.core.facts import TextEntry
-from mcatlas.core.model import GameMode, WorldFormat, WorldId
+from mcatlas.core.model import GameMode, Language, WorldFormat, WorldId
 from mcatlas.core.render import RenderArea, RenderedMap
 
 WID = WorldId("droom-wereld-abc123")
@@ -121,7 +121,7 @@ def _catalog() -> Catalog:
         dimension="minecraft:overworld",
         name="droom wereld",
         sorting=0,
-        areas=[RenderArea(label="plek 1", site=0, box=(48, -32, 127, 47), x=88, y=70, z=8)],
+        areas=[RenderArea(label="Site 1", site=0, box=(48, -32, 127, 47), x=88, y=70, z=8)],
         show_caves=True,
         level_file="level.dat",
         region_files=["region/r.0.0.mca"],
@@ -148,13 +148,14 @@ def _catalog() -> Catalog:
     )
 
 
-def _files() -> dict[str, bytes]:
+def _files(language: Language = "nl") -> dict[str, bytes]:
     return atlas_files(
         _catalog(),
         icons={WID: b"icon"},
         images={"flat/droom_wereld_abc123/0.png": b"png"},
         generated=date(2026, 9, 27),
         tool="mcatlas test",
+        language=language,
     )
 
 
@@ -167,18 +168,18 @@ def test_atlas_files_are_complete_and_deterministic():
         "index.html",
         "worlds.csv",
         "schema/world.schema.json",
-        *(base + f for f in ("README.md", "index.html", "facts.toml", "icon.png", "plek-1.png")),
-        base + "teksten.md",
-        base + "teksten.html",
+        *(base + f for f in ("README.md", "index.html", "facts.toml", "icon.png", "site-1.png")),
+        base + "texts.md",
+        base + "texts.html",
     }
     assert files == _files()  # the same catalog gives the same bytes
-    assert files[base + "plek-1.png"] == b"png" and files[base + "icon.png"] == b"icon"
+    assert files[base + "site-1.png"] == b"png" and files[base + "icon.png"] == b"icon"
     assert not any(p.startswith("annotations") for p in files)
 
     facts = tomllib.loads(files[base + "facts.toml"].decode())
     assert facts["schema_version"] == 1 and facts["game_mode"] == "creative"
     assert facts["activity"]["days"] == [date(2023, 2, 12), date(2023, 3, 1)]
-    assert facts["build"]["sites"][0]["image"] == "plek-1.png"
+    assert facts["build"]["sites"][0]["image"] == "site-1.png"
     assert (
         facts["build"]["sites"][0]["teleport"]
         == "/execute in minecraft:overworld run tp @s 88 72 8"
@@ -192,14 +193,34 @@ def test_atlas_files_are_complete_and_deterministic():
     readme = files[base + "README.md"].decode()
     assert "| Gebouwd | 1.234 blokken, 73% onder de grond |" in readme
     assert "februari 2023: 12 (1 dag)" in readme and "maart 2023: 1 (1 dag)" in readme
-    assert "![Plek 1 van bovenaf](plek-1.png)" in readme
+    assert "![Plek 1 van bovenaf](site-1.png)" in readme
     assert "Gevonden! · ★★★★★ · trein" in readme and "\n*ja*\n" in readme
-    assert "[teksten](teksten.md)" in readme
+    assert "[teksten](texts.md)" in readme
     index = files["index.md"].decode()
     assert f"[droom wereld](worlds/{WID}/README.md)" in index
     assert "Notities zonder wereld" in index and "gone-000000" in index
     assert f'href="worlds/{WID}/index.html"' in files["index.html"].decode()
-    assert "Sams / geheime basis" in files[base + "teksten.md"].decode()
+    assert "Sams / geheime basis" in files[base + "texts.md"].decode()
+    assert '<html lang="nl">' in files[base + "index.html"].decode()
+
+
+def test_atlas_in_english_has_the_same_files():
+    nl, en = _files("nl"), _files("en")
+    assert set(en) == set(nl)
+    base = f"worlds/{WID}/"
+    assert en[base + "facts.toml"] == nl[base + "facts.toml"]  # facts are language-neutral
+    assert en["worlds.csv"] == nl["worlds.csv"]
+
+    readme = en[base + "README.md"].decode()
+    assert "| Built | 1,234 blocks, 73% underground |" in readme
+    assert "February 2023: 12 (1 day)" in readme
+    assert "![Site 1 from above](site-1.png)" in readme and "[texts](texts.md)" in readme
+    assert '<html lang="en">' in en[base + "index.html"].decode()
+    assert "Notes without a world" in en["index.md"].decode()
+    assert "## Updating" in en["README.md"].decode()
+    pages = b"".join(v for k, v in en.items() if k.endswith((".md", ".html"))).decode()
+    for dutch in ("blokken", "werelden", "Plek ", "Bouwplekken", "Speeltijd", "onder de grond"):
+        assert dutch not in pages, dutch
 
 
 def test_writer_writes_changes_and_removes_only_its_own_files(tmp_path: Path):

@@ -1,6 +1,7 @@
 """Render 3D maps: copy what each map needs through the read-only source, then render.
 
-Only maps whose plan or copied files changed are rendered again (unless forced).
+Only maps whose plan or copied files changed are rendered again (unless forced). A change in
+the texts for people only (another language) updates the markers, not the tiles.
 """
 
 import fnmatch
@@ -9,8 +10,8 @@ from dataclasses import dataclass, field
 
 from mcatlas.core.catalog import WorldEntry
 from mcatlas.core.discovery import classify
-from mcatlas.core.model import Generator, WorldFormat
-from mcatlas.core.render import MIN_DATA_VERSION, MapPlan, plan_maps
+from mcatlas.core.model import Generator, Language, WorldFormat
+from mcatlas.core.render import MIN_DATA_VERSION, MapPlan, plan_maps, without_texts
 from mcatlas.ports import Renderer, WorldSource
 
 type Progress = Callable[[str], None]
@@ -23,6 +24,7 @@ class RenderOptions:
     pad: int = 32
     spawn_radius: int = 96
     max_side: int = 2048
+    language: Language = "en"
 
 
 @dataclass(slots=True)
@@ -94,6 +96,7 @@ def render_worlds(
                 spawn_radius=options.spawn_radius,
                 max_side=options.max_side,
                 sorting=rank[entry.world_id],
+                language=options.language,
             )
             if not world_plans:
                 report.skipped.append((entry.name, _why_not(entry)))
@@ -118,11 +121,9 @@ def render_worlds(
             for plan in world_plans:
                 plans[plan.map_id] = plan
                 before = previous.get(plan.map_id)
-                same_plan = (
-                    before is not None
-                    and MapPlan.model_validate(before.model_dump(include=set(MapPlan.model_fields)))
-                    == plan
-                )
+                same_plan = before is not None and without_texts(
+                    MapPlan.model_validate(before.model_dump(include=set(MapPlan.model_fields)))
+                ) == without_texts(plan)
                 if options.force or todo or not same_plan:
                     changed.add(plan.map_id)
 

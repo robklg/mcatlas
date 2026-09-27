@@ -527,6 +527,7 @@ def render(
         pad=r.pad,
         spawn_radius=r.spawn_radius,
         max_side=r.max_side,
+        language=settings.language,
     )
     try:
         report = render_worlds(
@@ -589,6 +590,7 @@ def export_atlas_command(
             ignore_file_days=settings.analysis.ignore_file_days,
             notes=_notes(settings),
             renderer=_renderer(settings),
+            language=settings.language,
         )
     finally:
         store.close()
@@ -604,7 +606,7 @@ def export_atlas_command(
 
 
 def _notes(settings: Settings) -> MarkdownAnnotations:
-    return MarkdownAnnotations(settings.paths.annotations())
+    return MarkdownAnnotations(settings.paths.annotations(), language=settings.language)
 
 
 def _report_note_problems(problems: list[str]) -> None:

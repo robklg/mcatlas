@@ -82,7 +82,7 @@ def test_store_saves_loads_and_removes(tmp_path: Path):
     assert store.load() == ({}, [])
     where = store.save(Annotation(world=WORLD, folder="trein statjon", title="Station"))
     assert where.endswith(f"{WORLD}.md")
-    assert (tmp_path / "annotations" / "README.md").is_file()
+    assert (tmp_path / "annotations" / "README.md").read_text().startswith("# Notes on")
     # A renamed file is still found through its `world` field.
     (tmp_path / "annotations" / f"{WORLD}.md").rename(tmp_path / "annotations" / "station.md")
     notes, problems = store.load()
@@ -94,6 +94,12 @@ def test_store_saves_loads_and_removes(tmp_path: Path):
     assert problems and problems[0].startswith("kapot.md")
     store.save(Annotation(world=WORLD))  # empty note: file removed
     assert not (tmp_path / "annotations" / "station.md").exists()
+    # The README is written once, in the configured language, and then left alone.
+    dutch = MarkdownAnnotations(tmp_path / "notes", language="nl")
+    dutch.save(Annotation(world=WORLD, title="x"))
+    assert (tmp_path / "notes" / "README.md").read_text().startswith("# Notities")
+    MarkdownAnnotations(tmp_path / "notes").save(Annotation(world=WORLD, title="y"))
+    assert (tmp_path / "notes" / "README.md").read_text().startswith("# Notities")
 
 
 def test_store_needs_a_directory_and_respects_the_guard(tmp_path: Path):

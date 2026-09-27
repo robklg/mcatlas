@@ -20,16 +20,18 @@ from mcatlas.core.model import (
     OVERWORLD,
     THE_END,
     DimensionLayout,
+    Language,
     WorldFormat,
     WorldId,
     WorldLayout,
 )
+from mcatlas.core.words import WORDS, Words, num
 
 if TYPE_CHECKING:
     from mcatlas.core.catalog import WorldEntry
 
 RENDER_VERSION: Final = 1
-"""Bump when plans change in a way that needs a re-render."""
+"""Bump when plans change in a way that needs a re-render (texts for people do not)."""
 REGION_BLOCKS: Final = 512
 MIN_DATA_VERSION: Final = 1451
 """1.13: older chunk formats are not rendered."""
@@ -49,7 +51,7 @@ type Box = tuple[int, int, int, int]
 
 class RenderArea(Facts):
     label: str
-    """"plek 1" for build site 1 (numbered as in the catalog), or "spawn"."""
+    """"Site 1" for build site 1 (numbered as in the catalog), or "Spawn"."""
     site: int | None = None
     """Index into `WorldEntry.build.sites`; None for the spawn area."""
     box: Box
@@ -71,6 +73,8 @@ class MapPlan(Facts):
     name: str
     sorting: int
     areas: list[RenderArea] = Field(default_factory=list[RenderArea])
+    marker_set: str = ""
+    """Name of the markers in the 3D view."""
     show_caves: bool = False
     """Keep dark underground blocks (costlier); on where much was built below the surface."""
     level_file: str
@@ -125,9 +129,19 @@ def regions(box: Box) -> set[tuple[int, int]]:
     }
 
 
-def _site_detail(built: int, pct_below: float | None) -> str:
-    text = f"{built:,} blokken gebouwd".replace(",", ".")
-    return text if pct_below is None else f"{text}, {pct_below:.0f}% onder de grond"
+def _site_detail(w: Words, built: int, pct_below: float | None) -> str:
+    text = w.built_detail.format(n=num(w, built))
+    return text if pct_below is None else f"{text}, {w.below_detail.format(pct=num(w, pct_below))}"
+
+
+def without_texts(plan: MapPlan) -> MapPlan:
+    """The plan without its texts for people: those change the markers, not the tiles."""
+    return plan.model_copy(
+        update={
+            "marker_set": "",
+            "areas": [a.model_copy(update={"label": "", "detail": ""}) for a in plan.areas],
+        }
+    )
 
 
 def _underground(entry: WorldEntry, areas: list[RenderArea]) -> bool:
@@ -153,8 +167,10 @@ def plan_maps(
     spawn_radius: int,
     max_side: int,
     sorting: int = 0,
+    language: Language = "en",
 ) -> list[MapPlan]:
     """One map per dimension that has build sites; the spawn area when there is no site."""
+    w = WORDS[language]
     if not renderable(entry) or entry.build is None or layout.level_dat is None:
         return []
     dims: dict[str, DimensionLayout] = {d.key: d for d in layout.dimensions if d.key in DIMENSIONS}
@@ -165,14 +181,14 @@ def plan_maps(
         roof = NETHER_ROOF_Y if site.dimension == NETHER else None
         areas.setdefault(site.dimension, []).append(
             RenderArea(
-                label=f"plek {i + 1}",
+                label=w.site_label.format(n=i + 1),
                 site=i,
                 box=clamp(pad(site.bbox, pad_blocks), site.x, site.z, max_side),
                 x=site.x,
                 y=min(site.max_y, roof) if roof is not None else site.max_y,
                 z=site.z,
                 max_y=roof,
-                detail=_site_detail(site.built, site.pct_below),
+                detail=_site_detail(w, site.built, site.pct_below),
             )
         )
     if not areas and entry.spawn is not None and OVERWORLD in dims:
@@ -180,7 +196,12 @@ def plan_maps(
         r = spawn_radius
         areas[OVERWORLD] = [
             RenderArea(
-                label="spawn", box=(x - r, z - r, x + r, z + r), x=x, y=y, z=z, detail="spawn"
+                label=w.spawn_label,
+                box=(x - r, z - r, x + r, z + r),
+                x=x,
+                y=y,
+                z=z,
+                detail=w.spawn_detail,
             )
         ]
 
@@ -207,6 +228,7 @@ def plan_maps(
                 name=f"{entry.name} ({label})" if label else entry.name,
                 sorting=sorting * 10 + list(DIMENSIONS).index(dimension),
                 areas=dim_areas,
+                marker_set=w.marker_set,
                 show_caves=dimension != OVERWORLD or _underground(entry, dim_areas),
                 level_file=layout.level_dat,
                 region_files=files,

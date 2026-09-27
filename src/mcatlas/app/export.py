@@ -7,6 +7,7 @@ from datetime import date, tzinfo
 from mcatlas.app.analyze import ICON
 from mcatlas.app.catalog import flat_images, load_catalog
 from mcatlas.core.atlas import AtlasChanges, atlas_files
+from mcatlas.core.model import Language
 from mcatlas.ports import AnnotationStore, AtlasWriter, FactStore, Renderer
 
 
@@ -30,13 +31,19 @@ def export_atlas(
     ignore_file_days: Iterable[date] = (),
     notes: AnnotationStore | None = None,
     renderer: Renderer | None = None,
+    language: Language = "en",
 ) -> ExportReport:
     catalog, problems = load_catalog(
         store, names, tz, ignore_file_days=ignore_file_days, notes=notes, renderer=renderer
     )
     images = flat_images(catalog, renderer, problems)
     files = atlas_files(
-        catalog, icons=store.assets(ICON), images=images, generated=today, tool=tool
+        catalog,
+        icons=store.assets(ICON),
+        images=images,
+        generated=today,
+        tool=tool,
+        language=language,
     )
     return ExportReport(
         worlds=len(catalog.worlds),

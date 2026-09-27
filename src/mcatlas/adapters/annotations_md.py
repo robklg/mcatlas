@@ -1,12 +1,12 @@
 """Annotations as Markdown files with TOML front matter, one per world (see core.annotations).
 
 The directory lives next to the archive so that the notes stay with the worlds; it is an output
-path, so the guard refuses it if it were ever inside a world source. A README explains the
-format for whoever finds the folder years from now.
+path, so the guard refuses it if it were ever inside a world source. A README (in the configured
+language, written once and then left alone) explains the format for whoever finds the folder
+years from now.
 """
 
 from pathlib import Path
-from typing import Final
 
 from mcatlas.adapters.outputs import atomic_write, remove
 from mcatlas.core.annotations import (
@@ -15,19 +15,8 @@ from mcatlas.core.annotations import (
     format_annotation,
     parse_annotation,
 )
-from mcatlas.core.model import WorldId
-
-README: Final = """# Notities bij de Minecraft-werelden
-
-Elk `.md`-bestand hier hoort bij één wereld uit het archief. Bovenaan staan tussen `+++`-regels
-een paar velden (TOML-formaat); daaronder vrije tekst.
-
-- `world`: vaste code van de wereld (laat staan: zo weet mcatlas bij welke wereld het hoort)
-- `folder`: mapnaam van de wereld in het archief
-- `title`, `tags`, `rating` (1-5), `updated`: optioneel
-
-De bestanden zijn met elke teksteditor te lezen en te bewerken, ook zonder mcatlas.
-"""
+from mcatlas.core.model import Language, WorldId
+from mcatlas.core.words import WORDS
 
 
 class AnnotationStoreError(RuntimeError):
@@ -35,8 +24,9 @@ class AnnotationStoreError(RuntimeError):
 
 
 class MarkdownAnnotations:
-    def __init__(self, directory: Path | None) -> None:
+    def __init__(self, directory: Path | None, *, language: Language = "en") -> None:
         self._dir = directory
+        self._readme = WORDS[language].notes_readme
 
     def _files(self) -> list[Path]:
         if self._dir is None or not self._dir.is_dir():
@@ -79,6 +69,6 @@ class MarkdownAnnotations:
             remove(path)
             return f"{path} (removed: empty)"
         if not (self._dir / "README.md").exists():
-            atomic_write(self._dir / "README.md", README.encode())
+            atomic_write(self._dir / "README.md", self._readme.encode())
         atomic_write(path, format_annotation(annotation).encode())
         return str(path)

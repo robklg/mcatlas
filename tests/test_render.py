@@ -23,12 +23,21 @@ from mcatlas.core.model import (
     OVERWORLD,
     DimensionKey,
     DimensionLayout,
+    Language,
     SourceFile,
     WorldFormat,
     WorldId,
     WorldLayout,
 )
-from mcatlas.core.render import MapPlan, RenderArea, clamp, map_id, plan_maps, regions
+from mcatlas.core.render import (
+    MapPlan,
+    RenderArea,
+    clamp,
+    map_id,
+    plan_maps,
+    regions,
+    without_texts,
+)
 
 WORLD = WorldId("sams-lab-a1b2c3")
 
@@ -86,8 +95,10 @@ LAYOUT = WorldLayout(
 )
 
 
-def _plan(entry: WorldEntry) -> list[MapPlan]:
-    return plan_maps(entry, LAYOUT, pad_blocks=32, spawn_radius=96, max_side=2048)
+def _plan(entry: WorldEntry, language: Language = "en") -> list[MapPlan]:
+    return plan_maps(
+        entry, LAYOUT, pad_blocks=32, spawn_radius=96, max_side=2048, language=language
+    )
 
 
 def test_map_ids_are_what_bluemap_accepts():
@@ -116,7 +127,7 @@ def test_plans_cover_sites_per_dimension_and_copy_only_needed_regions():
     )
     over, nether = _plan(entry)
     assert over.map_id == "sams_lab_a1b2c3" and over.name == "Lab"
-    assert [a.label for a in over.areas] == ["plek 1", "plek 4"]
+    assert [a.label for a in over.areas] == ["Site 1", "Site 4"]
     assert over.areas[0].box == (-32, -32, 63, 63)
     assert over.region_files == [
         "region/r.-1.-1.mca",
@@ -126,7 +137,12 @@ def test_plans_cover_sites_per_dimension_and_copy_only_needed_regions():
         "region/r.5.5.mca",
     ]
     assert over.show_caves  # site 4 is mostly underground
-    assert over.areas[1].detail == "1.234 blokken gebouwd, 80% onder de grond"
+    assert over.areas[1].detail == "1,234 blocks built, 80% underground"
+    assert over.marker_set == "Build sites"
+    dutch, _ = _plan(entry, "nl")
+    assert [a.label for a in dutch.areas] == ["Plek 1", "Plek 4"]
+    assert dutch.areas[1].detail == "1.234 blokken gebouwd, 80% onder de grond"
+    assert without_texts(dutch) == without_texts(over)  # same tiles in any language
     assert nether.name == "Lab (Nether)" and nether.region_files == ["DIM-1/region/r.0.0.mca"]
     assert nether.areas[0].max_y == 120 and nether.areas[0].y == 120  # below the roof
     assert over.sorting < nether.sorting
@@ -134,7 +150,7 @@ def test_plans_cover_sites_per_dimension_and_copy_only_needed_regions():
 
 def test_worlds_without_sites_show_their_spawn_and_old_worlds_nothing():
     [plan] = _plan(_entry([]))
-    assert [(a.label, a.box) for a in plan.areas] == [("spawn", (-86, -116, 106, 76))]
+    assert [(a.label, a.box) for a in plan.areas] == [("Spawn", (-86, -116, 106, 76))]
     assert plan.region_files == [
         "region/r.-1.-1.mca",
         "region/r.-1.0.mca",
@@ -226,7 +242,7 @@ def test_render_writes_index_images_and_config(tmp_path: Path):
         dimension=OVERWORLD,
         name="Lab",
         sorting=0,
-        areas=[RenderArea(label="plek 1", site=0, box=(0, 0, 31, 31), x=16, y=319, z=16)],
+        areas=[RenderArea(label="Site 1", site=0, box=(0, 0, 31, 31), x=16, y=319, z=16)],
         level_file="level.dat",
     )
     progress: list[str] = []
@@ -241,6 +257,21 @@ def test_render_writes_index_images_and_config(tmp_path: Path):
     assert '"metrics": false' in core and '"accept-download": false' in core
     with pytest.raises(ValueError, match="flat"):
         r.image("config/core.conf")
+    # Only the texts changed (another language): new markers, no new tiles.
+    dutch = plan.model_copy(
+        update={
+            "marker_set": "Bouwplekken",
+            "areas": [plan.areas[0].model_copy(update={"label": "Plek 1"})],
+        }
+    )
+    progress.clear()
+    assert r.render([dutch], set(), force=False, progress=progress.append) == []
+    assert not any("rendered" in p for p in progress)
+    [relabelled] = r.rendered()
+    assert relabelled.areas[0].label == "Plek 1" and relabelled.heights == {0: 70}
+    conf = (tmp_path / "render" / "config" / "maps" / "sams_lab_a1b2c3.conf").read_text()
+    assert '"label": "Plek 1"' in conf and '"label": "Bouwplekken"' in conf
+    assert "--markers sams_lab_a1b2c3" in (tmp_path / "render" / "fake-bluemap.log").read_text()
     # A map that is no longer planned disappears from the configuration.
     r.render([], set(), force=False, progress=progress.append)
     assert not (tmp_path / "render" / "config" / "maps" / "sams_lab_a1b2c3.conf").exists()
@@ -257,7 +288,7 @@ def test_tiles_a_share_would_not_replace_are_settled(tmp_path: Path, unsaved: by
         dimension=OVERWORLD,
         name="Lab",
         sorting=0,
-        areas=[RenderArea(label="plek 1", site=0, box=(0, 0, 15, 15), x=8, y=64, z=8)],
+        areas=[RenderArea(label="Site 1", site=0, box=(0, 0, 15, 15), x=8, y=64, z=8)],
         level_file="level.dat",
     )
     # The stand-in leaves an unsaved tile next to the old one, like an SMB "Resource busy".
@@ -279,7 +310,7 @@ def test_missing_jar_or_client_is_explained(tmp_path: Path):
         dimension=OVERWORLD,
         name="w",
         sorting=0,
-        areas=[RenderArea(label="spawn", box=(0, 0, 1, 1), x=0, y=64, z=0)],
+        areas=[RenderArea(label="Spawn", box=(0, 0, 1, 1), x=0, y=64, z=0)],
         level_file="level.dat",
     )
     with pytest.raises(RenderError, match="jar not found"):
