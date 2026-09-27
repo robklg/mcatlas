@@ -496,24 +496,61 @@
     } }, "kopieer");
   }
 
-  function drawMap(w, dimMap, sites) {
+  // Chunks in groups: builds far apart (a /fill at z = 10 million next to the base at spawn)
+  // cannot share one map, every chunk would be smaller than a pixel. Chunks closer than
+  // MAP_GAP chunks to each other end up in the same group.
+  const MAP_GAP = 32;
+  const MAP_PANELS = 8;
+  function chunkGroups(dimMap) {
     const n = dimMap.x.length;
-    const byChunk = new Map();
-    let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity; let maxBuilt = 1;
+    const parent = Array.from({ length: n }, (_, i) => i);
+    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const cells = new Map();
+    const cellOf = (x, z) => `${Math.floor(x / MAP_GAP)},${Math.floor(z / MAP_GAP)}`;
     for (let i = 0; i < n; i++) {
-      byChunk.set(`${dimMap.x[i]},${dimMap.z[i]}`, i);
+      const key = cellOf(dimMap.x[i], dimMap.z[i]);
+      if (cells.has(key)) parent[find(i)] = find(cells.get(key)); else cells.set(key, i);
+    }
+    for (const [key, i] of cells) {
+      const [cx, cz] = key.split(",").map(Number);
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        const j = cells.get(`${cx + dx},${cz + dz}`);
+        if (j !== undefined) parent[find(i)] = find(j);
+      }
+    }
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      const root = find(i);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(i);
+    }
+    const built = (g) => g.reduce((sum, i) => sum + dimMap.built[i], 0);
+    return [...groups.values()].sort((a, c) => built(c) - built(a) || c.length - a.length);
+  }
+
+  function bounds(dimMap, idx) {
+    let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
+    for (const i of idx) {
       x0 = Math.min(x0, dimMap.x[i]); x1 = Math.max(x1, dimMap.x[i]);
       z0 = Math.min(z0, dimMap.z[i]); z1 = Math.max(z1, dimMap.z[i]);
-      maxBuilt = Math.max(maxBuilt, dimMap.built[i]);
     }
-    const pad = 2;
+    return { x0, x1, z0, z1 };
+  }
+
+  // numbered: [[site, number in the table], ...] for the sites inside this map.
+  function drawMap(dimMap, idx, numbered, maxBuilt) {
+    const byChunk = new Map(idx.map((i) => [`${dimMap.x[i]},${dimMap.z[i]}`, i]));
+    const { x0, x1, z0, z1 } = bounds(dimMap, idx);
+    const extent = Math.max(x1 - x0 + 1, z1 - z0 + 1);
+    const r = Math.max(1.2, extent / 45);
+    const pad = Math.ceil(r) + 2; // room for site numbers at the edge
     const vx = x0 - pad; const vz = z0 - pad;
     const vw = x1 - x0 + 1 + 2 * pad; const vh = z1 - z0 + 1 + 2 * pad;
     const svg = s("svg", { class: "chunk-map", viewBox: `${vx} ${vz} ${vw} ${vh}`, role: "img",
-      "aria-label": `Kaart van ${dimName(dimMap.key)}: ${n} chunks met bouwwerk of aanwezigheid` });
+      "aria-label": `Kaart van ${dimName(dimMap.key)}: ${idx.length} chunks met bouwwerk of aanwezigheid` });
     svg.append(s("rect", { x: vx, y: vz, width: vw, height: vh, fill: "var(--surface-2)" }));
     const logMax = Math.log1p(maxBuilt);
-    for (let i = 0; i < n; i++) {
+    for (const i of idx) {
       const b = dimMap.built[i];
       const cell = { x: dimMap.x[i], y: dimMap.z[i], width: 1, height: 1 };
       if (b >= 8) {
@@ -523,15 +560,13 @@
         svg.append(s("rect", { ...cell, fill: "var(--presence)" }));
       }
     }
-    const extent = Math.max(vw, vh);
-    const r = Math.max(1.2, extent / 45);
-    sites.forEach((site, k) => {
+    for (const [site, number] of numbered) {
       const cx = site.x / 16; const cz = site.z / 16;
       svg.append(s("circle", { cx, cy: cz, r, fill: "var(--surface)", stroke: "var(--ink)", "stroke-width": r / 5 }));
       const t = s("text", { x: cx, y: cz, "font-size": r * 1.2, "text-anchor": "middle", "dominant-baseline": "central", fill: "var(--ink)", "font-weight": 600 });
-      t.textContent = String(k + 1);
+      t.textContent = String(number);
       svg.append(t);
-    });
+    }
     svg.addEventListener("mousemove", (ev) => {
       const pt = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(svg.getScreenCTM().inverse());
       const cx = Math.floor(pt.x); const cz = Math.floor(pt.y);
@@ -550,6 +585,36 @@
     });
     svg.addEventListener("mouseleave", hideTip);
     return svg;
+  }
+
+  // One map when everything is close together; otherwise a small map per group, the groups
+  // with the most building first, each captioned with where it lies.
+  function dimensionMaps(dimMap, sites) {
+    const all = dimMap.x.map((_, i) => i);
+    const maxBuilt = Math.max(1, ...dimMap.built);
+    const numbered = sites.map(([site, number]) => [site, number]);
+    const groups = chunkGroups(dimMap);
+    const whole = bounds(dimMap, all);
+    const span = Math.max(whole.x1 - whole.x0, whole.z1 - whole.z0) + 1;
+    if (groups.length === 1 || span <= 4 * MAP_GAP) return [drawMap(dimMap, all, numbered, maxBuilt)];
+    const shown = groups.filter((g, k) => k < MAP_PANELS && (k === 0 || g.some((i) => dimMap.built[i] >= 8)));
+    const rest = groups.length - shown.length;
+    const panels = shown.map((g) => {
+      const box = bounds(dimMap, g);
+      const inside = numbered.filter(([site]) => {
+        const cx = Math.floor(site.x / 16); const cz = Math.floor(site.z / 16);
+        return cx >= box.x0 - MAP_GAP && cx <= box.x1 + MAP_GAP && cz >= box.z0 - MAP_GAP && cz <= box.z1 + MAP_GAP;
+      });
+      const label = inside.length ? `Plek ${inside.map(([, n]) => n).join(", ")} · ` : "";
+      return h("figure", { class: "map-panel" },
+        drawMap(dimMap, g, inside, maxBuilt),
+        h("figcaption", null, `${label}x ${NUM.format(box.x0 * 16)} … ${NUM.format(box.x1 * 16 + 15)}, z ${NUM.format(box.z0 * 16)} … ${NUM.format(box.z1 * 16 + 15)}`));
+    });
+    return [
+      h("p", { class: "folder" }, `Deze plekken liggen ver uit elkaar, daarom een kaartje per gebied (elk op eigen schaal).`),
+      h("div", { class: "map-panels" }, panels),
+      rest > 0 ? h("p", { class: "folder" }, `Plus ${NUM.format(rest)} ${rest === 1 ? "plekje" : "plekjes"} waar alleen even iemand is geweest.`) : null,
+    ];
   }
 
   function layerProfile(b) {
@@ -629,15 +694,11 @@
       if (!dims.length) { mapBox.replaceChildren(h("p", { class: "folder" }, "Geen kaartgegevens.")); return; }
       let current = dims.find((d) => d.key === (b.main_dimension || "minecraft:overworld")) || dims[0];
       const show = () => {
-        const sites = b.sites.filter((x) => x.dimension === current.key);
-        const numbered = b.sites.map((x, k) => (x.dimension === current.key ? k : -1)).filter((k) => k >= 0);
-        const svg = drawMap(w, current, sites);
-        // Site numbers in the map must match the table: relabel with their table index.
-        [...svg.querySelectorAll("text")].forEach((t, j) => { t.textContent = String(numbered[j] + 1); });
+        const sites = b.sites.map((x, k) => [x, k + 1]).filter(([x]) => x.dimension === current.key);
         const picker = dims.length > 1 ? h("div", { class: "map-dims" }, dims.map((d) => h("button", {
           type: "button", class: d === current ? "ghost small active" : "ghost small",
           onclick: () => { current = d; show(); } }, dimName(d.key)))) : null;
-        mapBox.replaceChildren(...[picker, svg, h("p", { class: "folder" },
+        mapBox.replaceChildren(...[picker, ...dimensionMaps(current, sites), h("p", { class: "folder" },
           "Elk vakje is een chunk (16×16 blokken); noorden is boven. Blauw: gebouwd (donkerder = meer). ",
           "Grijs: spelers zijn er geweest zonder te bouwen. Nummers: bouwplekken uit de tabel.")].filter(Boolean));
       };
