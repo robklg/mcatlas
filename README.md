@@ -50,6 +50,10 @@ uv run mcatlas verify          # prove the archive is unchanged
 Other commands: `inventory` (list worlds without analyzing), `search TEXT` (names, players,
 signs, books, notes), `show WORLD`, `note WORLD [TEXT] [--title --tag --rating]`, `notes`.
 
+On the site, drag across the timeline (or pick dates) to see which worlds were played in a
+period; the other filters narrow the timeline too, and the URL (`#van=…&tot=…`) keeps the
+period for a bookmark.
+
 ## Adding worlds later
 
 mcatlas only reads **Java Edition** worlds, and only 1.13+ chunks are analyzed in depth and

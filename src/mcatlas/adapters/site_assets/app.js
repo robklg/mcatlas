@@ -169,6 +169,17 @@
   }
   const hours = (x) => `${DEC.format(x)} u`;
 
+  // ---------- time range: worlds with activity between two days ----------
+  const isoDay = (t) => new Date(t).toISOString().slice(0, 10);
+  const hasRange = () => state.from !== null || state.to !== null;
+  const inRange = (t) => (state.from === null || t >= state.from) && (state.to === null || t <= state.to);
+  // A week column counts as inside when any of its days is.
+  const binInRange = (i) => {
+    const start = axisStart + i * WEEK_MS;
+    return (state.to === null || start <= state.to) && (state.from === null || start + WEEK_MS - DAY_MS >= state.from);
+  };
+  const daysInRange = (w) => (hasRange() ? w._days.filter((d) => inRange(d.t)).length : w.activity.distinct_days);
+
   // ---------- activity strip (single series, sequential blue) ----------
   function strip(w, cls, height) {
     const wrap = h("div", { class: "strip-wrap", style: "position:relative" });
@@ -183,7 +194,8 @@
     w._bins.forEach((bin, i) => {
       if (!bin) return;
       const hgt = Math.max(3, ((H - 2) * bin.length) / 7);
-      svg.append(s("rect", { x: i * bw + gap / 2, y: H - 1 - hgt, width: Math.max(1.5, bw - gap), height: hgt, fill: "var(--accent)", rx: 1 }));
+      const fill = binInRange(i) ? "var(--accent)" : "var(--presence)";
+      svg.append(s("rect", { x: i * bw + gap / 2, y: H - 1 - hgt, width: Math.max(1.5, bw - gap), height: hgt, fill, rx: 1 }));
     });
     svg.addEventListener("mousemove", (ev) => {
       const box = svg.getBoundingClientRect();
@@ -239,7 +251,7 @@
   }
 
   // ---------- controls ----------
-  const state = { q: "", sort: "importance", version: "", mode: "", player: "", generator: "", underground: "", hideCopies: false, hideDownloaded: false, onlyNoted: false, view: "cards" };
+  const state = { from: null, to: null, q: "", sort: "importance", version: "", mode: "", player: "", generator: "", underground: "", hideCopies: false, hideDownloaded: false, onlyNoted: false, view: "cards" };
 
   function fillSelect(sel, values, label) {
     for (const v of values) sel.append(h("option", { value: v }, label ? label(v) : v));
@@ -278,12 +290,15 @@
     built: (w) => -(w.build ? w.build.built : -1),
     below: (w) => -(w.build && w.build.pct_below !== null ? w.build.pct_below : -1),
     name: (w) => w.name.toLocaleLowerCase("nl"),
+    inRange: (w) => -daysInRange(w),
   };
 
-  function visibleWorlds() {
+  // `ignoreRange`: every other filter, for the overview timeline that picks the range.
+  function visibleWorlds(ignoreRange = false) {
     const terms = state.q.toLocaleLowerCase("nl").split(/\s+/).filter(Boolean);
     const key = SORTS[state.sort];
     return CATALOG.worlds
+      .filter((w) => ignoreRange || !hasRange() || w._days.some((d) => inRange(d.t)))
       .filter((w) => terms.every((t) => w._search.includes(t) || w._textSearch.includes(t)))
       .filter((w) => !state.version || w._family === state.version)
       .filter((w) => !state.mode || String(w.game_mode) === state.mode)
@@ -347,6 +362,7 @@
   // ---------- views ----------
   function card(w) {
     const facts = h("div", { class: "facts" },
+      hasRange() ? [h("b", { class: "in-range" }, `${NUM.format(daysInRange(w))} ${daysInRange(w) === 1 ? "dag" : "dagen"} in de gekozen periode`), " · "] : null,
       h("b", { title: DAYS_NOTE }, daysText(w, true)), " · ",
       period(w),
       w.play_hours ? [" · ", h("b", null, hours(w.play_hours))] : null,
@@ -405,11 +421,97 @@
     } else {
       list.replaceChildren(table(worlds));
     }
+    renderTimeline();
     const total = CATALOG.worlds.length;
-    const range = CATALOG.first_day ? ` · ${fmtDay(CATALOG.first_day)} – ${fmtDay(CATALOG.last_day)}` : "";
+    const range = hasRange() ? ` actief ${rangeText()}` : "";
+    const span = CATALOG.first_day ? ` · ${fmtDay(CATALOG.first_day)} – ${fmtDay(CATALOG.last_day)}` : "";
     const ignored = (CATALOG.ignored_file_days || []).length
       ? ` · bestandsdatums van ${CATALOG.ignored_file_days.map(fmtDay).join(", ")} genegeerd (archiefkopie)` : "";
-    $("#summary").textContent = `${worlds.length} van ${total} werelden${range}${ignored}`;
+    $("#summary").textContent = `${worlds.length} van ${total} werelden${range}${span}${ignored}`;
+  }
+
+  // ---------- overview timeline: pick a range by dragging ----------
+  function rangeText() {
+    if (state.from !== null && state.to !== null) return `van ${DATE.format(new Date(state.from))} tot en met ${DATE.format(new Date(state.to))}`;
+    return state.from !== null ? `vanaf ${DATE.format(new Date(state.from))}` : `tot en met ${DATE.format(new Date(state.to))}`;
+  }
+  function setRange(from, to) {
+    if (from !== null && to !== null && from > to) [from, to] = [to, from];
+    state.from = from; state.to = to;
+    $("#t-from").value = from === null ? "" : isoDay(from);
+    $("#t-to").value = to === null ? "" : isoDay(to);
+    $("#t-clear").hidden = !hasRange();
+  }
+  function setHash() {
+    const p = new URLSearchParams();
+    if (state.from !== null) p.set("van", isoDay(state.from));
+    if (state.to !== null) p.set("tot", isoDay(state.to));
+    if ($("#detail").open && openWorld) p.set("w", openWorld.world_id);
+    const hash = p.toString();
+    history.replaceState(null, "", hash ? `#${hash}` : location.pathname + location.search);
+  }
+  let dragging = null;
+  function renderTimeline() {
+    const W = 1000; const H = 56; const gap = 1;
+    const bw = W / binCount;
+    const counts = new Array(binCount).fill(0);
+    for (const w of visibleWorlds(true)) w._bins.forEach((bin, i) => { if (bin) counts[i]++; });
+    const max = Math.max(1, ...counts);
+    const svg = s("svg", { class: "overview", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img",
+      "aria-label": "Aantal werelden met activiteit per week; sleep om een periode te kiezen" });
+    for (const y of years) {
+      svg.append(s("line", { x1: y.frac * W, x2: y.frac * W, y1: 0, y2: H, stroke: "var(--grid)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+    }
+    const band = s("rect", { y: 0, height: H, fill: "var(--accent-soft)", opacity: 0.6 });
+    svg.append(band);
+    const bars = counts.map((n, i) => {
+      if (!n) return null;
+      const hgt = Math.max(2, ((H - 2) * n) / max);
+      const bar = s("rect", { x: i * bw + gap / 2, y: H - 1 - hgt, width: Math.max(1, bw - gap), height: hgt, rx: 1 });
+      svg.append(bar);
+      return bar;
+    });
+    svg.append(s("line", { x1: 0, x2: W, y1: H - 0.5, y2: H - 0.5, stroke: "var(--baseline)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+    const paint = () => {
+      const on = hasRange();
+      let lo = binCount; let hi = -1;
+      bars.forEach((bar, i) => {
+        const inside = binInRange(i);
+        if (inside) { lo = Math.min(lo, i); hi = Math.max(hi, i); }
+        if (bar) bar.setAttribute("fill", !on || inside ? "var(--accent)" : "var(--presence)");
+      });
+      band.setAttribute("visibility", on && hi >= lo ? "visible" : "hidden");
+      if (hi >= lo) { band.setAttribute("x", lo * bw); band.setAttribute("width", (hi - lo + 1) * bw); }
+    };
+    paint();
+    const binAt = (ev) => {
+      const box = svg.getBoundingClientRect();
+      return Math.min(binCount - 1, Math.max(0, Math.floor(((ev.clientX - box.left) / box.width) * binCount)));
+    };
+    const weekRange = (a, b) => setRange(axisStart + Math.min(a, b) * WEEK_MS, axisStart + Math.max(a, b) * WEEK_MS + WEEK_MS - DAY_MS);
+    svg.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      svg.setPointerCapture(ev.pointerId);
+      dragging = binAt(ev);
+      weekRange(dragging, dragging);
+      paint();
+      hideTip();
+    });
+    svg.addEventListener("pointermove", (ev) => {
+      if (dragging !== null) { weekRange(dragging, binAt(ev)); paint(); return; }
+      const i = binAt(ev);
+      tip.replaceChildren(
+        h("div", null, `Week van ${DATE.format(new Date(axisStart + i * WEEK_MS))}`),
+        counts[i] ? h("div", null, `${counts[i]} ${counts[i] === 1 ? "wereld" : "werelden"} actief`) : h("div", { class: "muted" }, "geen activiteit"));
+      tip.hidden = false;
+      tip.style.left = `${Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8)}px`;
+      tip.style.top = `${ev.clientY + 14}px`;
+    });
+    const finish = () => { if (dragging === null) return; dragging = null; setHash(); render(); };
+    svg.addEventListener("pointerup", finish);
+    svg.addEventListener("pointercancel", finish);
+    svg.addEventListener("pointerleave", hideTip);
+    $("#t-chart").replaceChildren(svg, monthTicks());
   }
 
   // ---------- detail ----------
@@ -918,9 +1020,9 @@
     const dlg = $("#detail");
     if (!dlg.open) dlg.showModal();
     dlg.scrollTop = 0;
-    history.replaceState(null, "", `#w=${encodeURIComponent(w.world_id)}`);
+    setHash();
   }
-  $("#detail").addEventListener("close", () => history.replaceState(null, "", location.pathname + location.search));
+  $("#detail").addEventListener("close", setHash);
   $("#detail").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
   // ---------- wiring ----------
@@ -942,11 +1044,20 @@
     });
   }
 
-  const q = /^#q=(.+)$/.exec(location.hash);
-  if (q) { state.q = decodeURIComponent(q[1]); $("#q").value = state.q; }
+  const dayInput = (el) => (/^\d{4}-\d{2}-\d{2}$/.test(el.value) ? parseDay(el.value) : null);
+  for (const el of [$("#t-from"), $("#t-to")]) {
+    if (CATALOG.first_day) { el.min = CATALOG.first_day; el.max = CATALOG.last_day; }
+    el.addEventListener("change", () => { setRange(dayInput($("#t-from")), dayInput($("#t-to"))); setHash(); render(); });
+  }
+  $("#t-clear").addEventListener("click", () => { setRange(null, null); setHash(); render(); });
+
+  const params = new URLSearchParams(location.hash.slice(1));
+  const hashDay = (key) => (/^\d{4}-\d{2}-\d{2}$/.test(params.get(key) || "") ? parseDay(params.get(key)) : null);
+  setRange(hashDay("van"), hashDay("tot"));
+  if (params.get("q")) { state.q = params.get("q"); $("#q").value = state.q; }
   render();
   loadTexts();
   checkNotesApi();
-  const m = /^#w=(.+)$/.exec(location.hash);
-  if (m && byId.has(decodeURIComponent(m[1]))) openDetail(byId.get(decodeURIComponent(m[1])));
+  const wanted = params.get("w");
+  if (wanted && byId.has(wanted)) openDetail(byId.get(wanted));
 })();

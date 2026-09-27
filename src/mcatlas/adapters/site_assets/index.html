@@ -32,6 +32,7 @@
         <option value="chunks">Chunks</option>
         <option value="built">Meest gebouwd</option>
         <option value="below">Meest onder de grond</option>
+        <option value="inRange">Meest actief in gekozen periode</option>
         <option value="name">Naam</option>
       </select>
     </label>
@@ -52,6 +53,17 @@
       <button type="button" data-view="cards" class="active">Kaarten</button>
       <button type="button" data-view="table">Tabel</button>
     </div>
+  </section>
+
+  <section class="timeline" aria-label="Periode kiezen">
+    <div class="timeline-head">
+      <span class="timeline-title">Wanneer</span>
+      <label>van <input type="date" id="t-from"></label>
+      <label>tot <input type="date" id="t-to"></label>
+      <button type="button" class="ghost" id="t-clear" hidden>wis periode</button>
+      <span class="timeline-hint" id="t-hint">Aantal werelden met activiteit per week. Sleep om een periode te kiezen.</span>
+    </div>
+    <div id="t-chart"></div>
   </section>
 
   <main id="list" aria-live="polite"></main>
