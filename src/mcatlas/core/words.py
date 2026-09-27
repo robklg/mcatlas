@@ -100,6 +100,11 @@ class Words:
     spawn_caption: str
     top_blocks: str
     top_blocks_header: tuple[str, ...]
+    chunks_alt: str
+    chunks_caption: str
+    chunks_elsewhere: Plural
+    underground_alt: str
+    underground_caption: str
     maps_heading: str
     maps_count: Plural
     maps_intro: str
@@ -304,6 +309,21 @@ NL: Final = Words(
     spawn_caption="Het gebied{around} van bovenaf.",
     top_blocks="Meest gebouwde blokken",
     top_blocks_header=("Blok", "Aantal"),
+    chunks_alt="Wat er gebouwd is, van bovenaf",
+    chunks_caption=(
+        "Van bovenaf, per chunk van 16 × 16 blokken, noorden boven; 1 pixel is {blocks}. "
+        "Lichtgrijs is land, oranje is gebouwd: van licht (1 tot 9 blokken in een chunk) via "
+        "10, 100 en 1.000 tot donker (10.000 of meer). Omkaderd de bouwplekken met hun nummer."
+    ),
+    chunks_elsewhere=(
+        " {n} chunk met bouwsels ligt verder weg en staat niet op de kaart.",
+        " {n} chunks met bouwsels liggen verder weg en staan niet op de kaart.",
+    ),
+    underground_alt="Boven of onder de grond, van bovenaf",
+    underground_caption=(
+        "Dezelfde kaart voor chunks met minstens 20 gebouwde blokken: groen is vooral "
+        "bovengronds gebouwd, bruin vooral ondergronds, grijs half om half."
+    ),
     maps_heading="Kaarten in het spel",
     maps_count=("kaart", "kaarten"),
     maps_intro="{maps}, waarvan {filled} ingevuld.",
@@ -376,6 +396,8 @@ Alles hier bestaat uit gewone bestanden die je zonder mcatlas kunt openen, ook o
   - `facts.toml`: dezelfde feiten machineleesbaar (uitleg per veld in
     `schema/world.schema.json`),
   - `texts.html` / `texts.md`: bordjes, boeken, namen en commando's uit de wereld,
+  - `chunks.png`: wat er gebouwd is, per chunk van bovenaf, met de bouwplekken genummerd
+    (en `underground.png`: boven of onder de grond, bij werelden die veel ondergronds hebben),
   - `site-1.png`, `site-2.png`, ...: de bouwplekken van bovenaf (noorden boven, 1 pixel is
     1 of meer blokken), `icon.png`: het plaatje van de wereld uit het Minecraft-menu,
   - `maps/`: de kaarten die in het spel zijn gemaakt (`map_<nummer>.png`, zoals in het spel)
@@ -573,6 +595,21 @@ EN: Final = Words(
     spawn_caption="The area{around} from above.",
     top_blocks="Most built blocks",
     top_blocks_header=("Block", "Count"),
+    chunks_alt="What was built, from above",
+    chunks_caption=(
+        "From above, per chunk of 16 × 16 blocks, north up; 1 pixel is {blocks}. Light grey "
+        "is land, orange is built: from light (1 to 9 blocks in a chunk) via 10, 100 and "
+        "1,000 to dark (10,000 or more). Outlined: the build sites with their number."
+    ),
+    chunks_elsewhere=(
+        " {n} chunk with building lies further away and is not on the map.",
+        " {n} chunks with building lie further away and are not on the map.",
+    ),
+    underground_alt="Above or below ground, from above",
+    underground_caption=(
+        "The same map for chunks with at least 20 built blocks: green is built mostly above "
+        "ground, brown mostly below it, grey half and half."
+    ),
     maps_heading="In-game maps",
     maps_count=("map", "maps"),
     maps_intro="{maps}, {filled} of them filled in.",
@@ -644,6 +681,8 @@ Everything here is plain files you can open without mcatlas, also twenty years f
   - `facts.toml`: the same facts, machine-readable (each field is explained in
     `schema/world.schema.json`),
   - `texts.html` / `texts.md`: signs, books, names and commands from the world,
+  - `chunks.png`: what was built, per chunk from above, with the build sites numbered
+    (and `underground.png`: above or below ground, for worlds with much underground),
   - `site-1.png`, `site-2.png`, ...: the build sites from above (north up, 1 pixel is 1 or
     more blocks), `icon.png`: the world's picture from the Minecraft menu,
   - `maps/`: the maps made in the game (`map_<number>.png`, as in the game) and per

@@ -57,6 +57,7 @@ class StaticSiteWriter:
         payload = catalog.model_dump_json(
             exclude={
                 "maps": True,
+                "footprints": True,
                 "texts": True,
                 "annotations": True,
                 "worlds": {"__all__": {"annotation"}},

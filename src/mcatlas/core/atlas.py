@@ -22,6 +22,7 @@ from pydantic import Field
 from mcatlas.core.annotations import Annotation
 from mcatlas.core.build import BuildSite
 from mcatlas.core.catalog import Catalog, WorldEntry
+from mcatlas.core.chunkmap import ChunkMaps, chunk_maps
 from mcatlas.core.document import (
     Block,
     Code,
@@ -44,7 +45,7 @@ from mcatlas.core.document import (
 )
 from mcatlas.core.facts import Facts, TextEntry
 from mcatlas.core.model import OVERWORLD, Language, WorldFormat, WorldId
-from mcatlas.core.render import RenderedMap
+from mcatlas.core.render import CAVES_PCT_BELOW, RenderedMap
 from mcatlas.core.words import WORDS, Words, count, day, hours, num
 
 SCHEMA_VERSION: Final = 1
@@ -54,6 +55,8 @@ NOTES_DIR: Final = "annotations"
 """The notes folder next to the export; the export never writes there."""
 TEXTS: Final = "texts"
 """Base name of the texts page of a world (texts.md, texts.html)."""
+CHUNK_MAP: Final = "chunks.png"
+UNDERGROUND_MAP: Final = "underground.png"
 MAPS_DIR: Final = "maps"
 """In-game map images inside a world's folder."""
 
@@ -183,6 +186,10 @@ class AtlasBuild(Facts):
     built_chunks: int = 0
     main_dimension: str | None = None
     top_blocks: dict[str, int] = Field(default_factory=dict[str, int])
+    map_image: str | None = None
+    """What was built per chunk of the main dimension, from above."""
+    underground_image: str | None = None
+    """Above or below ground per chunk (only for worlds built much underground)."""
     sites: list[AtlasSite] = Field(default_factory=list[AtlasSite])
 
 
@@ -322,7 +329,10 @@ def _atlas_maps(e: WorldEntry, present: Collection[str]) -> AtlasMaps | None:
 
 
 def atlas_world(
-    e: WorldEntry, images: Mapping[int | None, str], map_images: Collection[str] = ()
+    e: WorldEntry,
+    images: Mapping[int | None, str],
+    map_images: Collection[str] = (),
+    chunks: ChunkMaps | None = None,
 ) -> AtlasWorld:
     a = e.activity
     b = e.build
@@ -399,6 +409,8 @@ def atlas_world(
             built_chunks=b.built_chunks,
             main_dimension=b.main_dimension,
             top_blocks=dict(b.top_blocks),
+            map_image=CHUNK_MAP if chunks else None,
+            underground_image=UNDERGROUND_MAP if chunks and chunks.underground else None,
             sites=[
                 AtlasSite(
                     number=i + 1,
@@ -658,11 +670,30 @@ def _players(w: Words, e: WorldEntry) -> list[Block]:
     ]
 
 
-def _sites(w: Words, e: WorldEntry, images: Mapping[int | None, str]) -> list[Block]:
+def _chunk_maps(w: Words, chunks: ChunkMaps | None) -> list[Block]:
+    if chunks is None:
+        return []
+    caption = w.chunks_caption.format(blocks=count(w, round(chunks.blocks_per_pixel), w.blocks))
+    if chunks.elsewhere:
+        forms = w.chunks_elsewhere
+        caption += (forms[0] if chunks.elsewhere == 1 else forms[1]).format(
+            n=num(w, chunks.elsewhere)
+        )
+    blocks: list[Block] = [Image(CHUNK_MAP, w.chunks_alt, caption)]
+    if chunks.underground is not None:
+        blocks.append(Image(UNDERGROUND_MAP, w.underground_alt, w.underground_caption))
+    return blocks
+
+
+def _sites(
+    w: Words, e: WorldEntry, images: Mapping[int | None, str], chunks: ChunkMaps | None = None
+) -> list[Block]:
     b = e.build
     if b is None:
         return []
     blocks: list[Block] = []
+    if not b.sites and chunks is not None:
+        blocks.append(Heading(2, w.sites_heading))
     if b.sites:
         rows: list[Sequence[Text]] = []
         for i, s in enumerate(b.sites):
@@ -684,6 +715,7 @@ def _sites(w: Words, e: WorldEntry, images: Mapping[int | None, str]) -> list[Bl
             Paragraph(w.sites_text),
             Table(list(w.sites_header), rows, numeric=(0, 5, 6, 7)),
         ]
+    blocks += _chunk_maps(w, chunks)
     for i, s in enumerate(b.sites):
         if i in images:
             caption = w.site_caption.format(
@@ -830,6 +862,7 @@ def world_document(
     *,
     has_icon: bool,
     map_images: Collection[str] = (),
+    chunks: ChunkMaps | None = None,
 ) -> Document:
     where: list[Inline] = [w.in_archive, Code(e.relpath)]
     if e.folder_name != e.name:
@@ -851,7 +884,7 @@ def world_document(
         Heading(2, w.summary),
         Table(["", ""], [list(r) for r in _play_rows(w, e) + _world_rows(w, e)]),
     ]
-    blocks += _sites(w, e, images)
+    blocks += _sites(w, e, images, chunks)
     blocks += _in_game_maps(w, e, map_images)
     blocks += _players(w, e)
     blocks += _timeline(w, e)
@@ -924,6 +957,23 @@ def readme_document(w: Words, catalog: Catalog, generated: date, tool: str) -> s
 # ---------- all files ----------
 
 
+def world_chunk_maps(catalog: Catalog, e: WorldEntry) -> ChunkMaps | None:
+    """The chunk maps of a world's main building dimension, if anything was built."""
+    b, build_map = e.build, catalog.maps.get(e.world_id)
+    if b is None or build_map is None or b.main_dimension is None:
+        return None
+    dim = next((d for d in build_map.dimensions if d.key == b.main_dimension), None)
+    if dim is None:
+        return None
+    sites = [(i + 1, s) for i, s in enumerate(b.sites) if s.dimension == b.main_dimension]
+    return chunk_maps(
+        dim,
+        catalog.footprints.get(e.world_id, {}),
+        sites,
+        underground=(b.pct_below or 0) >= CAVES_PCT_BELOW,
+    )
+
+
 def atlas_files(
     catalog: Catalog,
     *,
@@ -958,10 +1008,18 @@ def atlas_files(
         }
         icon = icons.get(e.world_id)
         maps = (in_game or {}).get(e.world_id, {})
-        doc = world_document(w, e, paths, has_icon=icon is not None, map_images=maps.keys())
+        chunks = world_chunk_maps(catalog, e)
+        doc = world_document(
+            w, e, paths, has_icon=icon is not None, map_images=maps.keys(), chunks=chunks
+        )
         files[base + "README.md"] = to_markdown(doc).encode()
         files[base + "index.html"] = to_html(doc, lang=language).encode()
-        files[base + "facts.toml"] = facts_toml(atlas_world(e, paths, maps.keys())).encode()
+        world = atlas_world(e, paths, maps.keys(), chunks)
+        files[base + "facts.toml"] = facts_toml(world).encode()
+        if chunks is not None:
+            files[base + CHUNK_MAP] = chunks.built
+            if chunks.underground is not None:
+                files[base + UNDERGROUND_MAP] = chunks.underground
         for name, data in maps.items():
             files[f"{base}{MAPS_DIR}/{name}"] = data
         if icon is not None:

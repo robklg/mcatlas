@@ -313,6 +313,11 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         "mosaic-overworld.png",
     ]
     assert facts["in_game_maps"]["mosaics"][0]["image"] == "maps/mosaic-overworld.png"
+    assert facts["build"]["map_image"] == "chunks.png"
+    assert facts["build"]["underground_image"] == "underground.png"  # 92% underground
+    assert (world_dir / "chunks.png").read_bytes().startswith(b"\x89PNG")
+    assert "![Wat er gebouwd is" not in (world_dir / "README.md").read_text()  # English
+    assert "![What was built, from above](chunks.png)" in (world_dir / "README.md").read_text()
     assert "![Map 1](maps/map_1.png)" in (world_dir / "README.md").read_text()
     assert "Alex en Sam" in (out / "atlas" / "index.html").read_text()
     assert not (out / "atlas" / "annotations").exists()

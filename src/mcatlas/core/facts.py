@@ -81,6 +81,9 @@ class DimensionFacts(Facts):
     """(min_x, min_z, max_x, max_z) in chunk coordinates."""
     chunk_saves_by_hour: dict[int, int] = Field(default_factory=dict[int, int])
     """Unix hour -> number of chunks whose last save falls in that hour."""
+    footprint: dict[str, str] = Field(default_factory=dict[str, str])
+    """Region "x,z" -> which of its 32 × 32 chunks exist: slot x + 32 z, one bit each
+    (numpy.packbits order), base64. All land ever generated, explored or not built on."""
 
 
 class RegionFacts(Facts):

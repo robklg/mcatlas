@@ -55,7 +55,7 @@ LEVEL = Analyzer(
 )
 PLAYERS = Analyzer("players", 1, 1, PlayersFacts, _simple(analyze_players))
 REGIONS = Analyzer(
-    "regions", 1, 1, RegionFacts, _simple(analyze_regions), lambda lay: bool(lay.dimensions)
+    "regions", 2, 1, RegionFacts, _simple(analyze_regions), lambda lay: bool(lay.dimensions)
 )
 FILES = Analyzer("files", 1, 1, FileFacts, _simple(analyze_files))
 MAPS = Analyzer("maps", 2, 1, MapFacts, _simple(analyze_maps))

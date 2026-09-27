@@ -166,6 +166,8 @@ class Catalog(Facts):
     worlds: list[WorldEntry] = Field(default_factory=list[WorldEntry])
     maps: dict[WorldId, BuildMap] = Field(default_factory=dict[WorldId, BuildMap])
     """Per-chunk build maps, by world; large, so writers may store them separately."""
+    footprints: dict[WorldId, dict[str, str]] = Field(default_factory=dict[WorldId, dict[str, str]])
+    """Generated chunks of the main building dimension per world (see DimensionFacts)."""
     texts: dict[WorldId, list[TextEntry]] = Field(default_factory=dict[WorldId, list[TextEntry]])
     """Texts found per world; large, so writers may store them separately."""
     annotations: dict[WorldId, Annotation] = Field(default_factory=dict[WorldId, Annotation])
@@ -426,6 +428,12 @@ def _renders(
     return by_world
 
 
+def _footprint(p: _Parsed, build: BuildSummary) -> dict[str, str]:
+    dims = p.regions.dimensions if p.regions else []
+    empty: dict[str, str] = {}
+    return next((d.footprint for d in dims if d.key == build.main_dimension), empty)
+
+
 def build_catalog(
     stored: Sequence[StoredWorld],
     names: Mapping[str, str],
@@ -466,6 +474,11 @@ def build_catalog(
         worlds=[e.model_copy(update={"annotation": notes.get(e.world_id)}) for e in entries],
         annotations=notes,
         maps={p.stored.world_id: b[1] for p, b in zip(parsed, builds, strict=True) if b},
+        footprints={
+            p.stored.world_id: _footprint(p, b[0])
+            for p, b in zip(parsed, builds, strict=True)
+            if b and b[0].main_dimension
+        },
         texts={w: t for w, t in texts.items() if t},
         renders=_renders(renders, {e.world_id for e in entries}),
     )

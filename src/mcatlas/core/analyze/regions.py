@@ -4,6 +4,7 @@ Only the 8 KiB header of each region file is read, in one batch per dimension so
 adapter can fetch them concurrently (latency, not bandwidth, dominates over SMB).
 """
 
+import base64
 from collections import Counter
 
 import numpy as np
@@ -22,6 +23,7 @@ def _dimension(
 ) -> DimensionFacts:
     code = dimension_code(dim.key)
     hours: Counter[int] = Counter()
+    footprint: dict[str, str] = {}
     chunks = empty = 0
     min_x = min_z = max_x = max_z = 0
     have_bbox = False
@@ -46,6 +48,8 @@ def _dimension(
             empty += 1
             continue
         xs, zs = header.chunk_coords()
+        bits = np.packbits(header.present).tobytes()
+        footprint[f"{region_x},{region_z}"] = base64.b64encode(bits).decode("ascii")
         ts = header.timestamps[header.present]
         chunks += int(xs.size)
         lo_x, lo_z, hi_x, hi_z = int(xs.min()), int(zs.min()), int(xs.max()), int(zs.max())
@@ -65,6 +69,7 @@ def _dimension(
         chunks=chunks,
         bbox_chunks=(min_x, min_z, max_x, max_z) if have_bbox else None,
         chunk_saves_by_hour=dict(sorted(hours.items())),
+        footprint=dict(sorted(footprint.items())),
     )
 
 

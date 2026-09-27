@@ -148,6 +148,8 @@ worlds/<world id>/
   README.md, index.html   everything known about the world (same content twice)
   facts.toml              machine-readable facts, with `schema_version`
   texts.md, .html         signs, books, names and commands
+  chunks.png              what was built per chunk, sites numbered (underground.png: above
+                          or below ground, for worlds built mostly underground)
   site-<n>.png, icon.png  flat maps of the build sites (from `render`), the world icon
   maps/                   in-game maps: the newest 24, and a mosaic per area with all maps
 annotations/          the notes (see below): never written by the export
