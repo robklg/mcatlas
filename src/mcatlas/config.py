@@ -7,12 +7,15 @@ Config file lookup: `--config`, then $MCATLAS_CONFIG, then ./mcatlas.toml, then
 ~/.config/mcatlas/config.toml.
 """
 
+import json
 import os
 import sys
+import tomllib
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Self, override
+from typing import Self, cast, override
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -24,6 +27,9 @@ from pydantic_settings import (
 )
 
 from mcatlas.core.model import Language
+
+USER_CONFIG = Path("~/.config/mcatlas/config.toml")
+"""Where `mcatlas init` writes, and the last place a config file is looked for."""
 
 _CONFIG_FILE: ContextVar[Path | None] = ContextVar("mcatlas_config_file", default=None)
 
@@ -214,7 +220,7 @@ def find_config_file(explicit: Path | None) -> Path | None:
         if not chosen.expanduser().is_file():
             raise ConfigError(f"config file not found: {chosen}")
         return chosen.expanduser()
-    for candidate in (Path("mcatlas.toml"), Path("~/.config/mcatlas/config.toml").expanduser()):
+    for candidate in (Path("mcatlas.toml"), USER_CONFIG.expanduser()):
         if candidate.is_file():
             return candidate
     return None
@@ -227,3 +233,89 @@ def load_settings(config_file: Path | None = None) -> tuple[Settings, Path | Non
         return Settings(), path  # pyright: ignore[reportCallIssue] - fields come from sources
     finally:
         _CONFIG_FILE.reset(token)
+
+
+# ---------- a first config file (`mcatlas init`) ----------
+
+
+@dataclass(frozen=True, slots=True)
+class InitAnswers:
+    language: Language
+    worlds: Path
+    state_dir: Path
+    site_dir: Path
+    atlas_dir: Path | None
+    timezone: str
+    usercache: Path | None = None
+    render_dir: Path | None = None
+    java: Path | None = None
+    jar: Path | None = None
+    client_jar: Path | None = None
+
+
+def _toml_path(path: Path) -> str:
+    """A quoted TOML string; paths under the home folder are written with ~."""
+    text = str(path.expanduser())
+    home = str(Path.home())
+    if text == home or text.startswith(home + os.sep):
+        text = "~" + text[len(home) :]
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _optional(key: str, path: Path | None, hint: str) -> str:
+    return f"{key} = {_toml_path(path)}" if path is not None else f'# {key} = "{hint}"'
+
+
+def config_text(a: InitAnswers) -> str:
+    """A commented config file for these answers (what `mcatlas init` writes)."""
+    atlas = _optional("atlas_dir", a.atlas_dir, "/path/next/to/the/archive/worlds_atlas")
+    render = _optional("render_dir", a.render_dir, "/path/with/space/mcatlas/render")
+    usercache = f"[{_toml_path(a.usercache)}]" if a.usercache is not None else "[]"
+    return f"""\
+# mcatlas configuration, written by `mcatlas init`. Edit freely; `mcatlas doctor` checks it.
+# All options with explanations: mcatlas.example.toml in the mcatlas repository.
+
+# Language of what people read: the site's default (switchable on the site), the atlas and
+# the 3D map markers. "en" or "nl".
+language = {json.dumps(a.language)}
+
+# The worlds. mcatlas only ever READS below this folder.
+[[sources]]
+id = "archive"
+path = {_toml_path(a.worlds)}
+archives = ["*.zip"]        # worlds inside zip files are read in place, never extracted
+
+[paths]
+# Local and small: the analysis cache and the manifests that prove the archive is unchanged.
+state_dir = {_toml_path(a.state_dir)}
+# The catalog website.
+site_dir = {_toml_path(a.site_dir)}
+# 3D maps: BlueMap's workspace (copies of the files it renders, tiles, the viewer).
+{render}
+# Durable output next to (never inside) the archive: the atlas, and your notes in annotations/.
+{atlas}
+
+[players]
+# The launcher's list of player names (read-only).
+usercache = {usercache}
+
+[players.names]
+# Names for players the launcher does not know, by UUID:
+# "0b0e0b0e-0000-4000-8000-000000000003" = "Noor"
+
+[analysis]
+timezone = {json.dumps(a.timezone)}   # turns timestamps into calendar days
+
+[render]
+# BlueMap CLI (https://github.com/BlueMap-Minecraft/BlueMap/releases) and Java 25 to run it.
+{_optional("java", a.java, "/path/to/java")}
+{_optional("jar", a.jar, "/path/to/bluemap-cli.jar")}
+# Textures from the client jar your Minecraft launcher already has.
+{_optional("client_jar", a.client_jar, "/path/to/minecraft/versions/1.21.5/1.21.5.jar")}
+"""
+
+
+def validate_config_text(text: str) -> Settings:
+    """Parse and validate a config file's text the same way loading it would."""
+    data = cast("dict[str, object]", tomllib.loads(text))
+    return Settings.model_validate(data)

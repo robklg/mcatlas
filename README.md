@@ -33,16 +33,18 @@ mcatlas does not mount anything. Mount your share however you like.
 
 ## Quick start
 
+You need [uv](https://docs.astral.sh/uv/) (it installs the right Python by itself) and a folder
+of Minecraft Java worlds. **Configure first**: mcatlas has no built-in paths.
+
 ```sh
-uv sync
-cp mcatlas.example.toml ~/.config/mcatlas/config.toml   # then edit paths
-uv run mcatlas doctor          # check configuration
+uv sync                        # install mcatlas and its dependencies
+uv run mcatlas init            # answer a few questions; writes ~/.config/mcatlas/config.toml
+uv run mcatlas doctor          # check the configuration
 uv run mcatlas snapshot        # baseline manifest (hashes every file once)
-uv run mcatlas analyze         # incremental: unchanged worlds are skipped
-uv run mcatlas analyze --tier 2   # also read every chunk: what was built, where, how deep
+uv run mcatlas analyze --tier 2   # analyze every world (incremental: unchanged ones are skipped)
 uv run mcatlas build-site      # writes the static site to paths.site_dir
-uv run mcatlas render          # 3D maps of the build sites (BlueMap), then verify
 uv run mcatlas serve           # http://127.0.0.1:8765 (or open index.html directly)
+uv run mcatlas render          # optional: 3D maps of the build sites (BlueMap), then verify
 uv run mcatlas export-atlas    # durable plain-file atlas next to the archive
 uv run mcatlas verify          # prove the archive is unchanged
 ```
@@ -53,6 +55,32 @@ signs, books, notes), `show WORLD`, `note WORLD [TEXT] [--title --tag --rating]`
 On the site, drag across the timeline (or pick dates) to see which worlds were played in a
 period; the other filters narrow the timeline too, and the URL (`#from=…&to=…`) keeps the
 period for a bookmark.
+
+## Configuration
+
+`mcatlas init` asks where the worlds are, where output may go, the language and (optionally)
+the 3D-map tools, suggests what it can find itself (the Minecraft launcher's player names, Java
+and client jar, your time zone), checks the answers and writes a commented config file. Run it
+again with `--force` to start over (the old file is kept as `.bak`), or edit the file by hand:
+[`mcatlas.example.toml`](mcatlas.example.toml) explains every option.
+
+mcatlas reads the first config file it finds: `--config FILE`, `$MCATLAS_CONFIG`,
+`./mcatlas.toml`, `~/.config/mcatlas/config.toml`. Any value can also come from the
+environment (`MCATLAS_LANGUAGE=nl`, `MCATLAS_ANALYSIS__JOBS=4`).
+
+| Setting | What it is |
+|---|---|
+| `language` | `en` or `nl`: the site's default language (visitors can switch on the site), the atlas and the 3D map markers |
+| `[[sources]] path` | The folder with the worlds. Only ever read; zip files in it are read in place |
+| `paths.state_dir` | Local and small: the analysis cache and manifests (keep it off network shares) |
+| `paths.site_dir` | The catalog website |
+| `paths.atlas_dir` | The durable atlas and your notes (`annotations/`), next to the archive |
+| `paths.render_dir` | BlueMap's workspace for 3D maps (large; leave out to skip 3D) |
+| `players.usercache`, `players.names` | Where player names come from |
+| `analysis.timezone` | Turns timestamps into calendar days |
+| `render.java`, `render.jar`, `render.client_jar` | Java 25, the BlueMap CLI jar and a Minecraft client jar for textures |
+
+Every output path must lie outside the worlds folder; mcatlas refuses to start otherwise.
 
 ## Adding worlds later
 

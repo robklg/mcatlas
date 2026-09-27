@@ -9,17 +9,20 @@ from contextvars import ContextVar
 from datetime import datetime
 from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
+import click
+import platformdirs
 import typer
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
-from mcatlas.adapters import guard, manifest
+from mcatlas.adapters import environment, guard, manifest
 from mcatlas.adapters.annotations_md import AnnotationStoreError, MarkdownAnnotations
 from mcatlas.adapters.atlas_fs import AtlasFolderWriter
 from mcatlas.adapters.bluemap import BlueMapRenderer, RenderError
+from mcatlas.adapters.outputs import atomic_write
 from mcatlas.adapters.serve import serve as make_server
 from mcatlas.adapters.site_static import StaticSiteWriter
 from mcatlas.adapters.source_folder import FolderSource
@@ -31,11 +34,19 @@ from mcatlas.app.annotations import NoteChange, change_from_form, find_world, sa
 from mcatlas.app.catalog import load_catalog, publish_site
 from mcatlas.app.export import export_atlas
 from mcatlas.app.render import RenderOptions, render_worlds
-from mcatlas.config import ConfigError, Settings, load_settings
+from mcatlas.config import (
+    USER_CONFIG,
+    ConfigError,
+    InitAnswers,
+    Settings,
+    config_text,
+    load_settings,
+    validate_config_text,
+)
 from mcatlas.core.catalog import Catalog, WorldEntry
 from mcatlas.core.discovery import classify
 from mcatlas.core.facts import TextEntry
-from mcatlas.core.model import WorldId, serial_map
+from mcatlas.core.model import Language, WorldId, serial_map
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -129,6 +140,97 @@ def _size(n: int) -> str:
 @app.callback()
 def main_callback(config: ConfigOpt = None) -> None:
     _config_file.set(config)
+
+
+def _prompt(question: str, default: str | None = None, **options: object) -> str:
+    answer = cast("object", typer.prompt(question, default=default, **options))  # pyright: ignore[reportArgumentType]
+    return str(answer).strip()
+
+
+def _ask_path(question: str, default: Path | None = None, *, must_exist: bool = False) -> Path:
+    while True:
+        answer = _prompt(question, str(default) if default is not None else None)
+        path = Path(answer).expanduser().absolute()
+        if not must_exist or path.is_dir():
+            return path
+        err.print(f"[yellow]Not a folder:[/] {path}")
+
+
+def _ask_optional_file(question: str, default: Path | None) -> Path | None:
+    answer = _prompt(question, str(default) if default else "", show_default=bool(default))
+    return Path(answer).expanduser().absolute() if answer else None
+
+
+@app.command()
+def init(
+    force: Annotated[
+        bool, typer.Option(help="Replace an existing config file (a .bak copy is kept)")
+    ] = False,
+) -> None:
+    """Create a config file by answering a few questions."""
+    target = (_config_file.get() or USER_CONFIG).expanduser()
+    if target.exists() and not force:
+        err.print(f"[yellow]{target} already exists.[/] Edit it, or run `mcatlas init --force`.")
+        raise typer.Exit(1)
+    console.print(f"This writes [bold]{target}[/]. Press Enter to accept a suggestion.\n")
+    chosen = _prompt(
+        "Language of the site and the atlas",
+        environment.language(),
+        type=click.Choice(["en", "nl"]),
+    )
+    language: Language = "nl" if chosen == "nl" else "en"
+    worlds = _ask_path("Folder with the Minecraft worlds (only ever read)", must_exist=True)
+    base = _ask_path("Folder for the generated site and 3D maps", Path.home() / "mcatlas")
+    atlas = _ask_path(
+        "Folder for the durable atlas and your notes (next to the worlds, not inside)",
+        worlds.parent / f"{worlds.name}_atlas",
+    )
+    render_dir = java = jar = client_jar = None
+    if typer.confirm("Make 3D maps with BlueMap? (needs Java 25 and the BlueMap CLI jar)"):
+        render_dir = base / "render"
+        java = _ask_optional_file("Java 25", environment.java())
+        jar = _ask_optional_file("BlueMap CLI jar (download: github.com/BlueMap-Minecraft)", None)
+        client_jar = _ask_optional_file(
+            "Minecraft client jar (for textures)", environment.client_jar()
+        )
+    answers = InitAnswers(
+        language=language,
+        worlds=worlds,
+        state_dir=platformdirs.user_state_path("mcatlas"),
+        site_dir=base / "site",
+        atlas_dir=atlas,
+        timezone=environment.timezone(),
+        usercache=environment.usercache(),
+        render_dir=render_dir,
+        java=java,
+        jar=jar,
+        client_jar=client_jar,
+    )
+    text = config_text(answers)
+    try:
+        validate_config_text(text)
+    except ValidationError as e:
+        err.print(f"[red]These answers do not work:[/] {e}")
+        raise typer.Exit(2) from e
+    # From here on nothing may write into the worlds folder, this config file included.
+    guard.protect([worlds])
+    if target.exists():
+        atomic_write(target.with_name(target.name + ".bak"), target.read_bytes())
+    atomic_write(target, text.encode())
+    console.print(f"\n[green]Written:[/] {target}")
+    console.print(
+        f"Time zone {answers.timezone}; player names from {answers.usercache or 'nowhere yet'}."
+    )
+    if render_dir is not None and (jar is None or client_jar is None):
+        console.print("[yellow]For 3D maps, fill in render.jar and render.client_jar later.[/]")
+    console.print(
+        "\nNext:\n"
+        "  uv run mcatlas doctor            # check the configuration\n"
+        "  uv run mcatlas snapshot          # record the archive, to prove later nothing changed\n"
+        "  uv run mcatlas analyze --tier 2  # analyze every world\n"
+        "  uv run mcatlas build-site        # write the catalog site\n"
+        "  uv run mcatlas serve             # open it on http://127.0.0.1:8765"
+    )
 
 
 @app.command()
