@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from contextlib import nullcontext
 from contextvars import ContextVar
 from datetime import datetime
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Annotated
 
@@ -17,6 +18,7 @@ from rich.table import Table
 
 from mcatlas.adapters import guard, manifest
 from mcatlas.adapters.annotations_md import AnnotationStoreError, MarkdownAnnotations
+from mcatlas.adapters.atlas_fs import AtlasFolderWriter
 from mcatlas.adapters.bluemap import BlueMapRenderer, RenderError
 from mcatlas.adapters.serve import serve as make_server
 from mcatlas.adapters.site_static import StaticSiteWriter
@@ -27,6 +29,7 @@ from mcatlas.adapters.workers import process_mapper
 from mcatlas.app.analyze import AnalyzeOptions, analyze_sources
 from mcatlas.app.annotations import NoteChange, change_from_form, find_world, save_note
 from mcatlas.app.catalog import load_catalog, publish_site
+from mcatlas.app.export import export_atlas
 from mcatlas.app.render import RenderOptions, render_worlds
 from mcatlas.config import ConfigError, Settings, load_settings
 from mcatlas.core.catalog import Catalog, WorldEntry
@@ -456,6 +459,44 @@ def render(
         finally:
             store.close()
         console.print(f"site updated → {location}")
+    if check:
+        verify(full=False)
+
+
+@app.command("export-atlas")
+def export_atlas_command(
+    check: Annotated[
+        bool, typer.Option(help="Verify afterwards that the archive is unchanged")
+    ] = False,
+) -> None:
+    """Write the durable atlas (Markdown, HTML, TOML, CSV, PNG) to paths.atlas_dir."""
+    settings = _settings()
+    atlas_dir = settings.paths.atlas_dir
+    if atlas_dir is None:
+        err.print("[red]Set paths.atlas_dir first[/] (a folder next to the archive).")
+        raise typer.Exit(2)
+    store = _store(settings)
+    try:
+        report = export_atlas(
+            store,
+            AtlasFolderWriter(atlas_dir, notes_dir=settings.paths.annotations()),
+            _names(settings),
+            settings.analysis.zone(),
+            today=datetime.now(settings.analysis.zone()).date(),
+            tool=f"mcatlas {package_version('mcatlas')}",
+            ignore_file_days=settings.analysis.ignore_file_days,
+            notes=_notes(settings),
+            renderer=_renderer(settings),
+        )
+    finally:
+        store.close()
+    w = report.written
+    console.print(
+        f"{report.worlds} worlds, {report.files} files ({report.images} images): "
+        f"{w.written} written, {w.unchanged} unchanged, {w.removed} removed → {w.location}"
+    )
+    for problem in report.problems:
+        err.print(f"[yellow]skipped[/] {problem}", highlight=False)
     if check:
         verify(full=False)
 

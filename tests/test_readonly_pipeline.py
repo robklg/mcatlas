@@ -3,6 +3,7 @@
 import io
 import os
 import stat
+import tomllib
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from builders import (
 )
 
 from mcatlas.adapters import guard, manifest
+from mcatlas.adapters.atlas_fs import AtlasFolderWriter
 from mcatlas.adapters.bluemap import BlueMapRenderer
 from mcatlas.adapters.site_static import StaticSiteWriter
 from mcatlas.adapters.source_folder import FolderSource
@@ -28,6 +30,7 @@ from mcatlas.adapters.store_sqlite import SqliteFactStore
 from mcatlas.adapters.workers import process_mapper
 from mcatlas.app.analyze import AnalyzeOptions, analyze_sources
 from mcatlas.app.catalog import publish_site
+from mcatlas.app.export import export_atlas
 from mcatlas.app.render import RenderOptions, render_worlds
 from mcatlas.core.model import WorldFormat
 
@@ -190,6 +193,16 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         catalog, index, _ = publish_site(
             store, StaticSiteWriter(out / "site"), names, UTC, renderer=renderer
         )
+        atlas = AtlasFolderWriter(out / "atlas", notes_dir=out / "atlas" / "annotations")
+        exported = export_atlas(
+            store,
+            atlas,
+            names,
+            UTC,
+            today=datetime(2026, 9, 27).date(),
+            tool="mcatlas test",
+            renderer=renderer,
+        )
     finally:
         store.close()
 
@@ -272,6 +285,20 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert catalog.renders[doors.world_id][0].areas[0].label == "spawn"  # copied from the zip
     assert by_folder["Demo_World"].world_id not in catalog.renders
 
+    # The durable atlas: plain files per world, the flat map and icon included.
+    assert exported.worlds == 8 and not exported.problems
+    world_dir = out / "atlas" / "worlds" / dream.world_id
+    facts = tomllib.loads((world_dir / "facts.toml").read_text())
+    assert facts["schema_version"] == 1 and facts["build"]["built"] == 130
+    assert facts["build"]["sites"][0]["image"] == "plek-1.png"
+    assert (world_dir / "plek-1.png").read_bytes() == (
+        out / "site" / dream_map.images[0]
+    ).read_bytes()
+    assert (world_dir / "icon.png").is_file()
+    assert "geheime basis" in (world_dir / "teksten.md").read_text()
+    assert "Alex en Sam" in (out / "atlas" / "index.html").read_text()
+    assert not (out / "atlas" / "annotations").exists()
+
     copy = by_folder["New World (3)"]
     assert any(r.world_id == dream.world_id and r.similarity > 0.9 for r in copy.related)
     assert not any(r.world_id == by_folder["boring"].world_id for r in dream.related)
@@ -295,6 +322,8 @@ def test_store_inside_source_is_refused(archive: Path):
             ),
             {},
         )
+    with pytest.raises(guard.SafetyError):
+        AtlasFolderWriter(archive / "atlas", notes_dir=None).write({"index.md": b"x"})
 
 
 def test_scan_skips_symlinks_and_rejects_escapes(tmp_path: Path):

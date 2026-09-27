@@ -45,6 +45,14 @@ def publish_site(
     catalog, problems = load_catalog(
         store, names, tz, ignore_file_days=ignore_file_days, notes=notes, renderer=renderer
     )
+    images = flat_images(catalog, renderer, problems)
+    return catalog, writer.write(catalog, store.assets(ICON), images), problems
+
+
+def flat_images(
+    catalog: Catalog, renderer: Renderer | None, problems: list[str]
+) -> dict[str, bytes]:
+    """The flat maps of all 3D renders by render path; unreadable ones go to `problems`."""
     images: dict[str, bytes] = {}
     if renderer is not None:
         for maps in catalog.renders.values():
@@ -53,4 +61,4 @@ def publish_site(
                     images[path] = renderer.image(path)
                 except OSError as e:
                     problems.append(f"flat map {path}: {e}")
-    return catalog, writer.write(catalog, store.assets(ICON), images), problems
+    return images

@@ -9,6 +9,7 @@ from contextlib import AbstractContextManager
 from typing import Protocol
 
 from mcatlas.core.annotations import Annotation
+from mcatlas.core.atlas import AtlasChanges
 from mcatlas.core.catalog import Catalog, StoredWorld
 from mcatlas.core.model import WorldFiles, WorldId, WorldLayout, WorldListing
 from mcatlas.core.render import MapPlan, RenderedMap
@@ -76,6 +77,17 @@ class SiteWriter(Protocol):
 
     def write_annotations(self, annotations: Mapping[WorldId, Annotation]) -> None:
         """Refresh only the notes in an already written site (cheap, after an edit)."""
+        ...
+
+
+class AtlasWriter(Protocol):
+    """Writes the durable atlas next to the archive; never touches the notes folder."""
+
+    def write(self, files: Mapping[str, bytes]) -> AtlasChanges:
+        """Make the atlas consist of exactly `files` (by relative path), writing only changes.
+
+        Files an earlier export wrote that are not in `files` are removed; anything else in the
+        folder (notes, files people put there) is left alone."""
         ...
 
 

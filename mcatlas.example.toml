@@ -18,7 +18,8 @@ state_dir = "~/.local/state/mcatlas"
 site_dir = "/Volumes/home/mcatlas/site"
 # 3D maps: BlueMap's workspace (copies of the region files it renders, tiles, the viewer).
 # render_dir = "/Volumes/home/mcatlas/render"
-# Durable output next to (never inside) the archive; notes go to <atlas_dir>/annotations.
+# Durable output next to (never inside) the archive: `export-atlas` writes the atlas here, and
+# notes go to <atlas_dir>/annotations.
 # atlas_dir = "/Volumes/share/Archive/Minecraft_worlds_atlas"
 # annotations_dir = "/Volumes/share/Archive/Minecraft_worlds_atlas/annotations"
 

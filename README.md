@@ -43,6 +43,7 @@ uv run mcatlas analyze --tier 2   # also read every chunk: what was built, where
 uv run mcatlas build-site      # writes the static site to paths.site_dir
 uv run mcatlas render          # 3D maps of the build sites (BlueMap), then verify
 uv run mcatlas serve           # http://127.0.0.1:8765 (or open index.html directly)
+uv run mcatlas export-atlas    # durable plain-file atlas next to the archive
 uv run mcatlas verify          # prove the archive is unchanged
 ```
 
@@ -68,6 +69,7 @@ uv run mcatlas verify            # should list only your new files as "added"
 uv run mcatlas snapshot          # new baseline that includes them
 uv run mcatlas analyze --tier 2  # only new or changed worlds are analyzed
 uv run mcatlas render            # only new maps; also refreshes the site
+uv run mcatlas export-atlas      # refresh the durable atlas
 ```
 
 Converting and optimizing re-save every chunk, which has two side effects: the day you did it
@@ -100,6 +102,28 @@ only appear when the catalog is opened that way. Requirements, in `[render]`:
   has, or `accept_download = true` to let BlueMap download it from Mojang. The latter means
   accepting the [Minecraft EULA](https://www.minecraft.net/eula), so it is off by default.
 
+## Durable atlas (export)
+
+`mcatlas export-atlas` writes the end result to `paths.atlas_dir` (next to the archive, never
+inside it) as plain files that stay readable without mcatlas:
+
+```
+README.md             what this is and how to read the numbers (in Dutch)
+index.md, index.html  all worlds in one table, most played first
+worlds.csv            the same, for a spreadsheet
+schema/world.schema.json
+worlds/<world id>/
+  README.md, index.html   everything known about the world (same content twice)
+  facts.toml              machine-readable facts, with `schema_version`
+  teksten.md, .html       signs, books, names and commands
+  plek-<n>.png, icon.png  flat maps of the build sites (from `render`), the world icon
+annotations/          the notes (see below): never written by the export
+```
+
+The HTML has no scripts. Running it again writes only files that changed, and removes only
+files an earlier export wrote (listed in `.mcatlas-export.json`) that are no longer needed.
+`--check` runs `verify` afterwards.
+
 ## Notes (annotations)
 
 Notes about a world are plain Markdown files with TOML front matter, one per world, in
@@ -121,6 +145,9 @@ Gevonden via de bordjes op de perrons.
 
 The `world` field ties a file to its world, so files can be renamed. Notes are searchable and
 filterable on the site and survive without mcatlas.
+
+After adding or editing notes, run `mcatlas export-atlas` again so the atlas pages quote them
+too (the notes themselves are already durable where they are).
 
 ## What it measures (tier 1)
 
@@ -153,8 +180,6 @@ Region files are read whole through the read-only source layer; decoding runs in
 processes (`analysis.processes`, default: all cores) that only ever receive bytes.
 The whole archive (1.8 million chunks) takes minutes; results are cached like tier 1.
 
-BlueMap renders, sign/book text search and a durable plain-text atlas export are planned.
-
 ## Architecture
 
 Light hexagonal (ports & adapters):
@@ -163,7 +188,7 @@ Light hexagonal (ports & adapters):
 cli.py          composition root (typer); the only place adapters are wired together
 config.py       pydantic-settings: TOML + MCATLAS_* env + CLI
 app/            one plain function per use case, against ports only
-ports.py        Protocols: WorldSource (read-only), FactStore, SiteWriter
+ports.py        Protocols: WorldSource (read-only), FactStore, SiteWriter, Renderer, AtlasWriter
 adapters/       filesystem, zip, SQLite, static site, manifests, audit-hook guard
 core/           pure: NBT decoder, region headers, format adapters, analyzers, catalog
 ```

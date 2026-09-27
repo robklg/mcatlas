@@ -12,7 +12,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Final
 
-from mcatlas.adapters.outputs import atomic_write
+from mcatlas.adapters.outputs import atomic_write, write_if_changed
 from mcatlas.core.annotations import Annotation
 from mcatlas.core.catalog import Catalog
 from mcatlas.core.model import WorldId
@@ -29,16 +29,6 @@ def _safe_relpath(relpath: str) -> Path:
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"not a relative path inside the site: {relpath!r}")
     return path
-
-
-def _write_if_changed(path: Path, data: bytes) -> None:
-    # Flat maps are large and rarely change; skip rewriting them over a network share.
-    try:
-        if path.stat().st_size == len(data) and path.read_bytes() == data:
-            return
-    except OSError:
-        pass
-    _write(path, data)
 
 
 def _script(assignment: str, payload: str) -> bytes:
@@ -94,7 +84,8 @@ class StaticSiteWriter:
             _script("MCATLAS_TEXTS = ", json.dumps(texts, ensure_ascii=False)),
         )
         for relpath, data in (images or {}).items():
-            _write_if_changed(self._dir / _safe_relpath(relpath), data)
+            # Flat maps are large and rarely change; skip rewriting them over a network share.
+            write_if_changed(self._dir / _safe_relpath(relpath), data)
         self.write_annotations(catalog.annotations)
         return str(self._dir / "index.html")
 
