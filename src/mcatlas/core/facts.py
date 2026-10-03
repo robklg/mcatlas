@@ -49,29 +49,45 @@ class ConsolePlayer(Facts):
     uuid: str
     """UUID of the Java player file the converter wrote for this gamertag."""
     host: bool = False
+    last_saved: datetime | None = None
+    """When the console last wrote this player's file (corrected), if known for sure."""
 
 
 class ConsoleFacts(Facts):
     """A world converted from a console edition, as described by the converter's metadata.
 
     The converted Java files carry the conversion date everywhere (file times, chunk saves,
-    LastPlayed), so dates, play time and players come from here instead.
+    LastPlayed), so dates, play time and players come from here instead. The console's clock
+    may have been wrong: dates are the converter's corrected ones, and a date that could be
+    read two ways is left out, with both readings kept as candidates.
     """
 
     metadata_file: str
     console: str | None = None
     original_name: str | None = None
     """The world's name in the console's world list."""
-    save_name_date: date | None = None
-    """Console-local date in the save's file name: usually when the world was created."""
+    created: date | None = None
+    """From the save's file name: usually when the world was created."""
+    created_candidates: list[date] = Field(default_factory=list[date])
     last_saved: datetime | None = None
     """When the console last wrote the save: the last time the world was played."""
+    last_saved_candidates: list[date] = Field(default_factory=list[date])
+    clock_offset_days: float | None = None
+    """How far the console's clock was behind at the last save (0 when it was right)."""
+    play_days: dict[date, int] = Field(default_factory=dict[date, int])
+    """Days on which chunks of this world were last saved, with how many chunks."""
+    undated_play_days: int = 0
+    """Further days with saved chunks whose date the console's clock leaves open."""
     play_ticks: int | None = None
     """World clock: it only runs while the world is loaded, so roughly the time played."""
     times_loaded: int | None = None
     bundled_map: bool = False
     """Started from a map that came with the game: clock and dates are partly its makers'."""
     players: list[ConsolePlayer] = Field(default_factory=list[ConsolePlayer])
+    chunk_times: dict[str, list[tuple[int, int, int]]] = Field(
+        default_factory=dict[str, list[tuple[int, int, int]]]
+    )
+    """Per dimension: (chunk x, chunk z, last saved as Unix time; 0 when undated)."""
     tool: str | None = None
     converted_at: datetime | None = None
     notes: list[str] = Field(default_factory=list[str])

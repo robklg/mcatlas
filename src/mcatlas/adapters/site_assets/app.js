@@ -340,7 +340,14 @@
   function originText(o) {
     const parts = [t("origin_value", { console: o.console || "?", tool: o.tool || "?",
       date: o.converted_at ? DATE.format(new Date(o.converted_at)) : "?" })];
+    if (o.clock_offset_days) parts.push(t("origin_clock", { years: DEC.format(o.clock_offset_days / 365.25) }));
     if (o.created) parts.push(t("origin_created", { date: DATE.format(new Date(o.created)) }));
+    if (o.last_played_candidates.length) {
+      parts.push(t("origin_uncertain", { dates: o.last_played_candidates.map((d) => DATE.format(new Date(d))).join(` ${t("or")} `) }));
+    }
+    if (o.undated_play_days) {
+      parts.push(t("origin_undated", { n: o.undated_play_days }));
+    }
     if (o.bundled_map) parts.push(t("origin_bundled"));
     return [...parts, ...o.notes].join("; ");
   }
@@ -933,6 +940,7 @@
         h("td", { class: "num" }, `${site.min_y} … ${site.max_y}`),
         h("td", { class: "num" }, site.chunks),
         h("td", { class: "num" }, site.hours_nearby ? hours(site.hours_nearby) : "–"),
+        h("td", { class: "num" }, site.last_saved ? DATE.format(new Date(site.last_saved * 1000)) : "–"),
         h("td", null, h("code", null, tpCommand(site)), " ", copyButton(tpCommand(site))),
         SERVED ? h("td", null, (() => {
           const view = siteView(w, k);
@@ -940,8 +948,8 @@
         })()) : null);
     });
     const sitesTable = b.sites.length ? h("table", { class: "plain sites" },
-      h("thead", null, h("tr", null, ["sc_seen", "sc_where", "sc_blocks", "sc_underground", "sc_height", "sc_chunks", "sc_nearby", "sc_teleport"]
-        .map((c, i) => h("th", { class: i >= 2 && i <= 6 ? "num" : null }, t(c))), SERVED ? h("th", null, "3D") : null)),
+      h("thead", null, h("tr", null, ["sc_seen", "sc_where", "sc_blocks", "sc_underground", "sc_height", "sc_chunks", "sc_nearby", "sc_saved", "sc_teleport"]
+        .map((c, i) => h("th", { class: i >= 2 && i <= 7 ? "num" : null }, t(c))), SERVED ? h("th", null, "3D") : null)),
       h("tbody", null, siteRows)) : h("p", { class: "folder" }, t("no_sites"));
 
     loadMap(w.world_id).then((data) => {

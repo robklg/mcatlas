@@ -21,6 +21,7 @@ from mcatlas.core.dedupe import similarity
 from mcatlas.core.facts import (
     BlockFacts,
     ConsoleFacts,
+    DimensionBlocks,
     Facts,
     FileFacts,
     InGameMap,
@@ -103,6 +104,13 @@ class Origin(Facts):
     console: str | None = None
     original_name: str | None = None
     created: date | None = None
+    created_candidates: list[date] = Field(default_factory=list[date])
+    """When the console's clock leaves the date open: both readings."""
+    last_played_candidates: list[date] = Field(default_factory=list[date])
+    clock_offset_days: float | None = None
+    """How far the console's clock was behind at the last save; dates are corrected for it."""
+    undated_play_days: int = 0
+    """Play days whose date the console's clock leaves open (not in the activity)."""
     tool: str | None = None
     converted_at: datetime | None = None
     bundled_map: bool = False
@@ -112,12 +120,16 @@ class Origin(Facts):
 
 def _origin(console: ConsoleFacts, tz: tzinfo) -> Origin:
     saved = console.last_saved.astimezone(tz).date() if console.last_saved else None
-    created = console.save_name_date
+    created = console.created
     return Origin(
         console=console.console,
         original_name=console.original_name,
         # A re-saved or copied save can carry a later date in its name than its last save.
         created=created if created is not None and (saved is None or created <= saved) else None,
+        created_candidates=console.created_candidates,
+        last_played_candidates=console.last_saved_candidates,
+        clock_offset_days=console.clock_offset_days,
+        undated_play_days=console.undated_play_days,
         tool=console.tool,
         converted_at=console.converted_at,
         bundled_map=console.bundled_map,
@@ -304,11 +316,23 @@ def _history_cutoff(p: _Parsed, names: Mapping[str, str], tz: tzinfo) -> int | N
     return int(datetime.combine(before, datetime.min.time(), tz).timestamp())
 
 
+def _with_console_times(blocks: BlockFacts, console: ConsoleFacts) -> BlockFacts:
+    """The chunks' last saves on the console, instead of the conversion's (0 when undated)."""
+    dims: list[DimensionBlocks] = []
+    for d in blocks.dimensions:
+        when = {(x, z): t for x, z, t in console.chunk_times.get(d.key, [])}
+        saved = [when.get((x, z), 0) for x, z in zip(d.table.x, d.table.z, strict=True)]
+        dims.append(d.model_copy(update={"table": d.table.model_copy(update={"saved": saved})}))
+    return blocks.model_copy(update={"dimensions": dims})
+
+
 def _build(
     p: _Parsed, names: Mapping[str, str], tz: tzinfo
 ) -> tuple[BuildSummary, BuildMap] | None:
     if p.blocks is None or (p.level is not None and p.level.generator is Generator.DEBUG):
         return None  # a debug world shows every block state: nothing was built
+    if p.console is not None:
+        return summarize(_with_console_times(p.blocks, p.console))
     return summarize(p.blocks, history_before=_history_cutoff(p, names, tz))
 
 

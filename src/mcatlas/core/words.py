@@ -91,6 +91,12 @@ class Words:
     """`{console}`, `{tool}`, `{date}`: a world converted from a console save."""
     origin_created: str
     origin_bundled: str
+    origin_clock: str
+    """`{years}`: dates corrected for a console clock that was behind."""
+    origin_uncertain: str
+    """`{dates}`: the last play date the console's clock leaves open."""
+    origin_undated: Plural
+    or_word: str
     size: str
     size_value: str
     importance_label: str
@@ -320,6 +326,13 @@ NL: Final = Words(
     origin_bundled=(
         "begonnen vanaf een kaart die bij het spel zat: de speeltijd is niet (alleen) van ons"
     ),
+    origin_clock="datums gecorrigeerd voor de klok van de console, die {years} jaar achterliep",
+    origin_uncertain="laatst gespeeld onzeker: {dates}",
+    origin_undated=(
+        "nog {n} speeldag die niet te dateren is",
+        "nog {n} speeldagen die niet te dateren zijn",
+    ),
+    or_word="of",
     size="Grootte",
     size_value="{mb} MB in {files}",
     importance_label="Belangrijkheid",
@@ -343,6 +356,7 @@ NL: Final = Words(
         "Blokken",
         "Ondergronds",
         "In de buurt",
+        "Laatst opgeslagen",
         "Teleport",
     ),
     height_range="{low} tot {high}",
@@ -637,6 +651,13 @@ EN: Final = Words(
     origin_value="{console}, converted to Java with {tool} on {date}",
     origin_created="created on {date}",
     origin_bundled="started from a map that came with the game: its play time is not (only) ours",
+    origin_clock="dates corrected for the console's clock, which was {years} years behind",
+    origin_uncertain="last played uncertain: {dates}",
+    origin_undated=(
+        "{n} more play day that cannot be dated",
+        "{n} more play days that cannot be dated",
+    ),
+    or_word="or",
     size="Size",
     size_value="{mb} MB in {files}",
     importance_label="Importance",
@@ -660,6 +681,7 @@ EN: Final = Words(
         "Blocks",
         "Underground",
         "Nearby",
+        "Last saved",
         "Teleport",
     ),
     height_range="{low} to {high}",

@@ -1,9 +1,14 @@
 """Metadata that lce2java keeps when it converts a Minecraft: Wii U Edition world to Java.
 
 `wiiu_metadata.json` (see the README.md lce2java writes next to it) holds what the converted
-Java files lost: when the world was created and last played, how long and how often it was
-loaded, and the players' gamertags. Only the fields used here are read; the rest stays in the
-file.
+Java files lost: when the world was created and last played, on which days its chunks were
+saved, how long and how often it was loaded, and the players' gamertags. `wiiu_chunk_times.json`
+holds each chunk's last save. Only the fields used here are read; the rest stays in the files.
+
+The console's clock was not always right. Next to each date lce2java writes `<field>_corrected`
+and `<field>_clock` (the clock period and how it was decided): a date is used when its period
+is known, and kept as two candidates when it is "ambiguous". Metadata from before those
+corrections is read as it is.
 """
 
 import hashlib
@@ -86,6 +91,33 @@ def _day(text: str | None) -> date | None:
     return moment.date() if moment else None
 
 
+DATED_PERIODS = frozenset({"A", "B1", "B2"})
+"""Clock periods whose correction is known: right (A), or behind by a known offset (B1, B2)."""
+_DIMENSIONS = {0: "minecraft:overworld", -1: "minecraft:the_nether", 1: "minecraft:the_end"}
+
+type _Dated = tuple[datetime | None, list[datetime], float | None]
+
+
+def _number(parent: _Json, key: str) -> float | None:
+    value = parent.get(key)
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _dated(parent: _Json, key: str) -> _Dated:
+    """(date, candidates, clock offset in days) of `parent[key]`, corrected when possible."""
+    clock = _obj(parent, f"{key}_clock")
+    if not clock:  # written before lce2java corrected dates
+        return _moment(_str(parent, key)), [], None
+    period = _str(clock, "period")
+    if period in DATED_PERIODS:
+        return _moment(_str(parent, f"{key}_corrected")), [], _number(clock, "offset_days")
+    if period == "ambiguous":
+        values = _obj(clock, "candidates").values()
+        found = (_moment(v) for v in values if isinstance(v, str))
+        return None, sorted(m for m in found if m is not None), None
+    return None, [], None
+
+
 def _players(world: _Json) -> list[ConsolePlayer]:
     value = world.get("players")
     items = cast("list[object]", value) if isinstance(value, list) else []
@@ -96,42 +128,111 @@ def _players(world: _Json) -> list[ConsolePlayer]:
             name = _str(p, "name")
             if name:
                 players.append(
-                    ConsolePlayer(name=name, uuid=lce_player_uuid(name), host=p.get("host") is True)
+                    ConsolePlayer(
+                        name=name,
+                        uuid=lce_player_uuid(name),
+                        host=p.get("host") is True,
+                        last_saved=_dated(p, "last_saved_utc")[0],
+                    )
                 )
     return players
 
 
-def _last_played(source: _Json, world: _Json, created: date | None) -> datetime | None:
+def _last_played(source: _Json, world: _Json, created: date | None) -> _Dated:
     """The console's own file time; the decoded `last_played_utc` only when it is plausible.
 
     lce2java decodes LastPlayed with one epoch, but later game versions count from another:
     for those worlds it lands years before the world was even created.
     """
-    file_time = _moment(_str(_obj(_obj(source, "wfs_file_times_utc"), "save_file"), "mtime"))
-    if file_time is not None:
-        return file_time
-    reported = _moment(_str(world, "last_played_utc"))
-    if reported is not None and (created is None or reported.date() >= created):
-        return reported
-    return None
+    save_file = _obj(_obj(source, "wfs_file_times_utc"), "save_file")
+    if _str(save_file, "mtime") is not None:
+        return _dated(save_file, "mtime")
+    moment, candidates, offset = _dated(world, "last_played_utc")
+    if moment is not None and (created is None or moment.date() >= created):
+        return moment, [], offset
+    return None, candidates, None
 
 
-def parse_console(data: bytes, metadata_file: str) -> ConsoleFacts:
+def _play_days(world: _Json) -> tuple[dict[date, int], int]:
+    """Days chunks were last saved (with how many), and how many more days are undated."""
+    value = _obj(world, "play_evidence").get("per_day")
+    items = cast("list[object]", value) if isinstance(value, list) else []
+    days: dict[date, int] = {}
+    undated = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        entry = cast("_Json", item)
+        day = _day(_str(entry, "date"))
+        periods = set(_strings(entry, "clock_periods"))
+        if day is None or not periods <= DATED_PERIODS:
+            undated += 1
+            continue
+        dims = _obj(entry, "dimensions")
+        chunks = sum(_int(_obj(dims, key), "chunks_last_saved") or 0 for key in dims)
+        days[day] = days.get(day, 0) + chunks
+    return days, undated
+
+
+def parse_chunk_times(data: bytes) -> dict[str, list[tuple[int, int, int]]]:
+    """`wiiu_chunk_times.json`: each chunk's last save per dimension (0 when undated)."""
+    raw = cast("object", json.loads(data))
+    root = cast("_Json", raw) if isinstance(raw, dict) else {}
+    columns = _strings(root, "columns")
+    corrected = "last_saved_corrected_unix" in columns
+    saved = "last_saved_corrected_unix" if corrected else "last_saved_unix"
+    needed = ["dimension", "chunk_x", "chunk_z", saved]
+    if not set(needed) <= set(columns):
+        return {}
+    at = [columns.index(name) for name in needed]
+    period = columns.index("clock_period") if "clock_period" in columns else None
+    value = root.get("rows")
+    rows = cast("list[object]", value) if isinstance(value, list) else []
+    times: dict[str, list[tuple[int, int, int]]] = {}
+    for row in rows:
+        cells = cast("list[object]", row) if isinstance(row, list) else []
+        if len(cells) != len(columns):
+            continue
+        dim, x, z, when = (cells[i] for i in at)
+        if not all(isinstance(v, int) for v in (dim, x, z, when)):
+            continue
+        key = _DIMENSIONS.get(cast("int", dim))
+        if key is None:
+            continue
+        dated = period is None or cells[period] in DATED_PERIODS
+        times.setdefault(key, []).append(
+            (cast("int", x), cast("int", z), cast("int", when) if dated else 0)
+        )
+    return times
+
+
+def parse_console(
+    data: bytes, metadata_file: str, chunk_times: bytes | None = None
+) -> ConsoleFacts:
     raw = cast("object", json.loads(data))
     root = cast("_Json", raw) if isinstance(raw, dict) else {}
     source, world, conversion = _obj(root, "source"), _obj(root, "world"), _obj(root, "conversion")
     name = _str(world, "name")
-    created = _day(_str(source, "date_in_save_name"))
+    created, created_candidates, _ = _dated(source, "date_in_save_name")
+    created_day = created.date() if created else None
+    last_saved, last_candidates, offset = _last_played(source, world, created_day)
+    play_days, undated = _play_days(world)
     return ConsoleFacts(
         metadata_file=metadata_file,
         console=_str(source, "console"),
         original_name=name,
-        save_name_date=created,
-        last_saved=_last_played(source, world, created),
+        created=created_day,
+        created_candidates=[c.date() for c in created_candidates],
+        last_saved=last_saved,
+        last_saved_candidates=[c.date() for c in last_candidates],
+        clock_offset_days=offset,
+        play_days=play_days,
+        undated_play_days=undated,
         play_ticks=_int(world, "time_played_ticks"),
         times_loaded=_int(world, "times_loaded"),
         bundled_map=name in BUNDLED_MAPS,
         players=_players(world),
+        chunk_times=parse_chunk_times(chunk_times) if chunk_times else {},
         tool=_str(conversion, "tool"),
         converted_at=_moment(_str(conversion, "converted_at_utc")),
         notes=_strings(conversion, "notes"),

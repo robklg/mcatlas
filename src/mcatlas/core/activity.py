@@ -14,7 +14,8 @@ Two corrections keep the estimate honest:
   history instead of counting as our activity.
 * **Converted worlds.** A world converted from a console save carries the conversion date in
   every chunk, file and its LastPlayed. From the conversion day on, those signals are dropped;
-  the console's own save dates take their place.
+  the console's own dates take their place: the days its chunks were last saved, and when the
+  save and its player files were written.
 """
 
 from collections import Counter
@@ -79,10 +80,10 @@ def _count_by_day(by_hour: Iterable[tuple[int, int]], tz: tzinfo) -> dict[date, 
 
 
 def _console_days(console: ConsoleFacts, tz: tzinfo) -> dict[date, int]:
-    """The day in the save's name and the day the console last saved it."""
+    """Days the console wrote the save or a player file, and the day in the save's name."""
+    moments = [console.last_saved, *(p.last_saved for p in console.players)]
     days: dict[date, int] = {}
-    saved = console.last_saved.astimezone(tz).date() if console.last_saved else None
-    for day in (console.save_name_date, saved):
+    for day in (console.created, *(m.astimezone(tz).date() for m in moments if m)):
         if day is not None:
             days[day] = days.get(day, 0) + 1
     return days
@@ -117,6 +118,9 @@ def collect_days(
         file_days = {d: n for d, n in file_days.items() if d < converted}
         adv_days = {d: n for d, n in adv_days.items() if d < converted}
         played = played if played is not None and played < converted else None
+    if console is not None:
+        for day, n in console.play_days.items():
+            chunk_days[day] = chunk_days.get(day, 0) + n
 
     day_set = set(chunk_days) | set(file_days) | set(adv_days) | set(console_days)
     if played is not None:

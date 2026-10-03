@@ -139,15 +139,27 @@ def _build_server_worlds(root: Path) -> None:
 
 CONVERTED = T0 + 200 * DAY
 """When lce2java converted the Wii U world: every chunk and file of it carries this date."""
+B2 = {"period": "B2", "offset_days": 1392.15, "basis": "after-switch"}
+"""lce2java's correction for a console clock that ran 1392 days behind."""
+CASTLE_SAVED = int(datetime(2020, 6, 19, 18, tzinfo=UTC).timestamp())
+"""When the console last saved the castle's chunk (corrected)."""
 
 
 def _build_wiiu_world(root: Path) -> None:
     """A Wii U save converted by lce2java: the real history is only in wiiu_metadata.json."""
+    save_file = {
+        "mtime": "2016-09-01T15:00:00Z",  # the console's clock was behind
+        "mtime_corrected": "2020-06-20T18:36:00Z",
+        "mtime_clock": B2,
+    }
+    castle = {"overworld": {"chunks_last_saved": 30}}
     metadata = {
         "source": {
             "console": "Nintendo Wii U",
             "date_in_save_name": "2017-01-14T12:00:00",
-            "wfs_file_times_utc": {"save_file": {"mtime": "2017-03-02T15:00:00Z"}},
+            "date_in_save_name_corrected": "2017-01-14T12:00:00Z",
+            "date_in_save_name_clock": {"period": "A", "offset_days": 0, "basis": "save-version"},
+            "wfs_file_times_utc": {"save_file": save_file},
         },
         "world": {
             "name": "Noors kasteel",
@@ -155,6 +167,12 @@ def _build_wiiu_world(root: Path) -> None:
             "time_played_ticks": 5 * 72_000,
             "times_loaded": 4,
             "players": [{"name": "NoorBouwt", "host": True}, {"name": "SamWii"}],
+            "play_evidence": {
+                "per_day": [
+                    {"date": "2020-06-19", "clock_periods": ["B2"], "dimensions": castle},
+                    {"date": "2018-02-02", "clock_periods": ["ambiguous"], "dimensions": castle},
+                ]
+            },
         },
         "conversion": {
             "tool": "lce2java 0.1.0",
@@ -165,10 +183,11 @@ def _build_wiiu_world(root: Path) -> None:
     }
     player = {"Pos": TypedList(6, [1.0, 64.0, 1.0]), "Dimension": "minecraft:overworld"}
     # Converted from the old format: no structure references, only the stronghold's start.
+    floor = {(x, 61, z): "minecraft:oak_planks" for x in range(10) for z in range(10)}
     old = chunk_nbt(
         1,
         0,
-        {(5, 40, 5): "minecraft:stone_bricks", (6, 61, 6): "minecraft:oak_planks"},
+        {(5, 40, 5): "minecraft:stone_bricks"} | floor,
         fill=[(0, 59, "minecraft:stone"), (60, 60, "minecraft:grass_block")],
         inhabited=36_000,
         status="minecraft:empty",
@@ -185,6 +204,12 @@ def _build_wiiu_world(root: Path) -> None:
                 {"data": {"Features": {"[4,-2]": np.zeros(8, dtype=np.int8)}}}
             ),
             "wiiu_metadata.json": json.dumps(metadata).encode(),
+            "wiiu_chunk_times.json": json.dumps(
+                {
+                    "columns": ["dimension", "chunk_x", "chunk_z", "last_saved_corrected_unix"],
+                    "rows": [[0, 1, 0, CASTLE_SAVED], [0, 2, 0, CASTLE_SAVED - DAY]],
+                }
+            ).encode(),
             f"players/data/{lce_player_uuid('NoorBouwt')}.dat": nbt_gz(player),
             f"players/data/{lce_player_uuid('SamWii')}.dat": nbt_gz(player),
             "data/minecraft/maps/0.dat": map_dat(0, 0, color=5),
@@ -443,8 +468,19 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
 
     # A world converted from a Wii U: its history comes from the console, not the conversion.
     wiiu = by_folder["Noors kasteel [wiiu 80000001-170014120000]"]
-    assert sorted(wiiu.activity.days) == [datetime(2017, 1, 14).date(), datetime(2017, 3, 2).date()]
-    assert wiiu.last_played == datetime(2017, 3, 2, 15, tzinfo=UTC)
+    # Dates corrected for the console's clock: created, a day chunks were saved, the last save.
+    assert sorted(wiiu.activity.days) == [
+        datetime(2017, 1, 14).date(),
+        datetime(2020, 6, 19).date(),
+        datetime(2020, 6, 20).date(),
+    ]
+    assert wiiu.activity.days[datetime(2020, 6, 19).date()].chunk_saves == 30
+    assert wiiu.last_played == datetime(2020, 6, 20, 18, 36, tzinfo=UTC)
+    origin = wiiu.origin
+    assert origin is not None and (origin.clock_offset_days, origin.undated_play_days) == (
+        1392.15,
+        1,
+    )
     assert (wiiu.play_hours, wiiu.sessions, wiiu.hours_per_session) == (5.0, 4, 1.25)
     assert sorted((p.name, p.known) for p in wiiu.players) == [("Noor", True), ("SamWii", False)]
     assert wiiu.origin is not None and wiiu.origin.console == "Nintendo Wii U"
@@ -452,7 +488,8 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert wiiu.origin.notes == ["11 of 2,916 chunks could not be recovered."]
     assert "console: a sign could not be converted" in wiiu.errors
     assert wiiu.in_game_maps is not None and wiiu.in_game_maps.total == 1
-    assert wiiu.build is not None and wiiu.build.top_blocks == [("minecraft:oak_planks", 1)]
+    assert wiiu.build is not None and wiiu.build.top_blocks == [("minecraft:oak_planks", 100)]
+    assert [site.last_saved for site in wiiu.build.sites] == [CASTLE_SAVED]
     # Its chunks were never lit by the game: BlueMap must render them anyway, others not.
     maps_conf = out / "render" / "config" / "maps"
 

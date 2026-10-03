@@ -45,6 +45,8 @@ class BuildSite(Facts):
     pct_below: float | None
     hours_nearby: float
     """Most time spent near any of its chunks (InhabitedTime; nearby chunks all count)."""
+    last_saved: int | None = None
+    """Unix time of the latest save of any of its chunks: roughly when someone was last there."""
 
 
 class BuildSummary(Facts):
@@ -143,6 +145,7 @@ def build_sites(key: str, t: ChunkTable) -> list[BuildSite]:
                 min_y=min(t.min_y[i] for i in rows),
                 max_y=max(t.max_y[i] for i in rows),
                 hours_nearby=round(max(t.inhabited[i] for i in rows) / TICKS_PER_HOUR, 1),
+                last_saved=max((t.saved[i] for i in rows), default=0) or None,
             )
         )
     return sites

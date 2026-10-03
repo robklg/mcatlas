@@ -14,7 +14,7 @@ import json
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Final
 
 import tomli_w
@@ -174,6 +174,8 @@ class AtlasSite(Facts):
     below: int
     pct_below: float | None = None
     hours_nearby: float
+    last_saved: date | None = None
+    """The latest save of any of its chunks: roughly when someone was last there."""
     teleport: str
     image: str | None = None
 
@@ -431,6 +433,7 @@ def atlas_world(
                     below=s.below,
                     pct_below=s.pct_below,
                     hours_nearby=s.hours_nearby,
+                    last_saved=_last_there(s),
                     teleport=_tp(s),
                     image=image_name(i) if i in images else None,
                 )
@@ -665,11 +668,24 @@ def _play_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
     return rows
 
 
+def _last_there(site: BuildSite) -> date | None:
+    return datetime.fromtimestamp(site.last_saved, UTC).date() if site.last_saved else None
+
+
 def _origin(w: Words, o: Origin) -> str:
     converted = day(w, o.converted_at.date()) if o.converted_at else "?"
     parts = [w.origin_value.format(console=o.console or "?", tool=o.tool or "?", date=converted)]
+    if o.clock_offset_days:
+        parts.append(w.origin_clock.format(years=num(w, o.clock_offset_days / 365.25, 1)))
     if o.created is not None:
         parts.append(w.origin_created.format(date=day(w, o.created)))
+    if o.last_played_candidates:
+        dates = f" {w.or_word} ".join(day(w, d) for d in o.last_played_candidates)
+        parts.append(w.origin_uncertain.format(dates=dates))
+    if o.undated_play_days:
+        forms = w.origin_undated
+        n = o.undated_play_days
+        parts.append((forms[0] if n == 1 else forms[1]).format(n=num(w, n)))
     if o.bundled_map:
         parts.append(w.origin_bundled)
     return "; ".join([*parts, *o.notes])
@@ -776,6 +792,7 @@ def _sites(
                     num(w, s.built),
                     _pct(w, s.pct_below),
                     hours(w, s.hours_nearby),
+                    day(w, saved) if (saved := _last_there(s)) else "–",
                     Code(_tp(s)),
                 ]
             )

@@ -84,7 +84,7 @@ BLOCKS = Analyzer(
 
 CONSOLE = Analyzer(
     "console",
-    2,
+    3,
     1,
     ConsoleFacts,
     _simple(analyze_console),
