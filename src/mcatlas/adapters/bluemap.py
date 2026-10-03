@@ -288,6 +288,7 @@ class BlueMapRenderer:
             "start-pos": {"x": start.x, "z": start.z},
             **_LOOK.get(plan.dimension, _END_LOOK),
             "sky-light": 1,
+            "ignore-missing-light-data": plan.unlit,
             "remove-caves-below-y": -10_000 if plan.show_caves else 55,
             "cave-detection-ocean-floor": -5,
             "min-inhabited-time": 0,

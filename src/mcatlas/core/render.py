@@ -77,6 +77,9 @@ class MapPlan(Facts):
     """Name of the markers in the 3D view."""
     show_caves: bool = False
     """Keep dark underground blocks (costlier); on where much was built below the surface."""
+    unlit: bool = False
+    """The world was converted from a console: its chunks have no light data until the game
+    first loads them, and BlueMap skips such chunks unless told otherwise."""
     level_file: str
     region_files: list[str] = Field(default_factory=list[str])
     """Relative paths of the region files the areas overlap (only those that exist)."""
@@ -257,6 +260,7 @@ def plan_maps(
                 areas=dim_areas,
                 marker_set=w.marker_set,
                 show_caves=dimension != OVERWORLD or _underground(entry, dim_areas),
+                unlit=entry.origin is not None,
                 level_file=layout.level_dat,
                 region_files=files,
             )

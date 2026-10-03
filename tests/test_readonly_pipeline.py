@@ -37,7 +37,7 @@ from mcatlas.app.catalog import publish_site
 from mcatlas.app.export import export_atlas
 from mcatlas.app.render import RenderOptions, render_worlds
 from mcatlas.core.formats.console import lce_player_uuid
-from mcatlas.core.model import WorldFormat
+from mcatlas.core.model import WorldFormat, WorldId
 
 T0 = 1_676_199_600  # 2023-02-12 11:00 UTC
 DAY = 86_400
@@ -453,6 +453,14 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert "console: a sign could not be converted" in wiiu.errors
     assert wiiu.in_game_maps is not None and wiiu.in_game_maps.total == 1
     assert wiiu.build is not None and wiiu.build.top_blocks == [("minecraft:oak_planks", 1)]
+    # Its chunks were never lit by the game: BlueMap must render them anyway, others not.
+    maps_conf = out / "render" / "config" / "maps"
+
+    def unlit(world_id: WorldId) -> bool:
+        conf = (maps_conf / f"{catalog.renders[world_id][0].map_id}.conf").read_text()
+        return json.loads(conf)["ignore-missing-light-data"]
+
+    assert unlit(wiiu.world_id) and not unlit(dream.world_id)
 
     # The durable atlas: plain files per world, the flat map and icon included.
     assert exported.worlds == 11 and not exported.problems
