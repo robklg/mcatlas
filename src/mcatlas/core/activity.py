@@ -12,6 +12,9 @@ Two corrections keep the estimate honest:
 * **Imported history.** A downloaded map carries its makers' chunk timestamps. When the caller
   knows when "our" players arrived (`history_before`), earlier days are kept separately as
   history instead of counting as our activity.
+* **Converted worlds.** A world converted from a console save carries the conversion date in
+  every chunk, file and its LastPlayed. From the conversion day on, those signals are dropped;
+  the console's own save dates take their place.
 """
 
 from collections import Counter
@@ -20,7 +23,14 @@ from datetime import date, datetime, tzinfo
 
 from pydantic import Field
 
-from mcatlas.core.facts import Facts, FileFacts, LevelFacts, PlayersFacts, RegionFacts
+from mcatlas.core.facts import (
+    ConsoleFacts,
+    Facts,
+    FileFacts,
+    LevelFacts,
+    PlayersFacts,
+    RegionFacts,
+)
 
 ARTIFACT_MIN_WORLDS = 5
 ARTIFACT_MIN_SHARE = 0.10
@@ -34,11 +44,13 @@ class DaySignals(Facts):
     advancements: int = 0
     """Advancement criteria first met on this day."""
     last_played: bool = False
+    console_saves: int = 0
+    """Times the console saved the world on this day, as far as known (a converted world)."""
 
     @property
     def file_only(self) -> bool:
         return self.file_saves > 0 and not (
-            self.chunk_saves or self.advancements or self.last_played
+            self.chunk_saves or self.advancements or self.last_played or self.console_saves
         )
 
 
@@ -66,6 +78,16 @@ def _count_by_day(by_hour: Iterable[tuple[int, int]], tz: tzinfo) -> dict[date, 
     return days
 
 
+def _console_days(console: ConsoleFacts, tz: tzinfo) -> dict[date, int]:
+    """The day in the save's name and the day the console last saved it."""
+    days: dict[date, int] = {}
+    saved = console.last_saved.astimezone(tz).date() if console.last_saved else None
+    for day in (console.save_name_date, saved):
+        if day is not None:
+            days[day] = days.get(day, 0) + 1
+    return days
+
+
 def collect_days(
     *,
     regions: RegionFacts | None,
@@ -73,6 +95,7 @@ def collect_days(
     players: PlayersFacts | None,
     level: LevelFacts | None,
     tz: tzinfo,
+    console: ConsoleFacts | None = None,
 ) -> dict[date, DaySignals]:
     """All dated evidence of a world, per local calendar day, without any correction."""
     chunk_days: dict[date, int] = {}
@@ -87,8 +110,15 @@ def collect_days(
             day = moment.astimezone(tz).date()
             adv_days[day] = adv_days.get(day, 0) + 1
     played = level.last_played.astimezone(tz).date() if level and level.last_played else None
+    console_days = _console_days(console, tz) if console else {}
+    if console is not None and console.converted_at is not None:
+        converted = console.converted_at.astimezone(tz).date()
+        chunk_days = {d: n for d, n in chunk_days.items() if d < converted}
+        file_days = {d: n for d, n in file_days.items() if d < converted}
+        adv_days = {d: n for d, n in adv_days.items() if d < converted}
+        played = played if played is not None and played < converted else None
 
-    day_set = set(chunk_days) | set(file_days) | set(adv_days)
+    day_set = set(chunk_days) | set(file_days) | set(adv_days) | set(console_days)
     if played is not None:
         day_set.add(played)
     return {
@@ -97,6 +127,7 @@ def collect_days(
             file_saves=file_days.get(d, 0),
             advancements=adv_days.get(d, 0),
             last_played=d == played,
+            console_saves=console_days.get(d, 0),
         )
         for d in sorted(day_set)
     }
@@ -120,7 +151,13 @@ def build_profile(
     history: dict[date, DaySignals] = {}
     for d, raw in days.items():
         sig = raw.model_copy(update={"file_saves": 0}) if d in ignore_file_days else raw
-        if not (sig.chunk_saves or sig.file_saves or sig.advancements or sig.last_played):
+        if not (
+            sig.chunk_saves
+            or sig.file_saves
+            or sig.advancements
+            or sig.last_played
+            or sig.console_saves
+        ):
             continue
         (history if history_before is not None and d < history_before else kept)[d] = sig
 

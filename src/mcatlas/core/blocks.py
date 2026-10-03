@@ -56,6 +56,9 @@ SURFACE_WINDOW: Final = 17
 INHABITED_MIN_TICKS: Final = 1200
 """Chunks where players spent at least a minute are kept even without building."""
 REGION_BLOCKS: Final = 512
+STRONGHOLD_REACH: Final = 7
+"""Chunks from a stronghold's start chunk that its rooms can reach (Java keeps them within
+about 112 blocks)."""
 MAX_ERRORS: Final = 5
 
 _categories: dict[str, int] = {}
@@ -90,11 +93,23 @@ def _context_category(name: str, structures: tuple[str, ...]) -> int:
     return cat
 
 
-def _generated(chunk: Chunk, *, near_spawner: bool) -> tuple[str, ...]:
+def _likely(chunk: Chunk, job: RegionJob) -> tuple[str, ...]:
+    """Structures to assume in a chunk converted from the old format (it has no references)."""
+    if not chunk.legacy or chunk.structures:
+        return ()
+    near = any(
+        max(abs(chunk.x - x), abs(chunk.z - z)) <= STRONGHOLD_REACH for x, z in job.strongholds
+    )
+    return (*job.likely, "likely_stronghold") if near else job.likely
+
+
+def _generated(
+    chunk: Chunk, *, near_spawner: bool, likely: tuple[str, ...] = ()
+) -> tuple[str, ...]:
     """What could have placed non-natural blocks here: the chunk's structures, plus the
     pseudo-structures "dungeon" (a spawner in this or a neighbouring chunk; dungeons straddle
     chunk borders) and "unvisited" (players spent little time nearby)."""
-    context = chunk.structures
+    context = (*chunk.structures, *likely)
     if near_spawner:
         context = (*context, "dungeon")
     if chunk.inhabited_ticks < VISITED_TICKS:
@@ -108,6 +123,11 @@ class RegionJob:
     region_x: int
     region_z: int
     data: bytes
+    likely: tuple[str, ...] = ()
+    """Structures assumed in this dimension's chunks converted from the old format, which carry
+    no structure references (see `structure_blocks.LIKELY`)."""
+    strongholds: tuple[tuple[int, int], ...] = ()
+    """Start chunks of the strongholds, as far as the world's data files tell."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +185,14 @@ class _Pending:
 _NO_GROUND: Final = np.iinfo(np.int32).min
 
 
-def _classify(chunk: Chunk, saved: int, scan: RegionScan, *, near_spawner: bool) -> _Pending:
+def _classify(
+    chunk: Chunk,
+    saved: int,
+    scan: RegionScan,
+    *,
+    near_spawner: bool,
+    likely: tuple[str, ...] = (),
+) -> _Pending:
     """Categorize all blocks; count built blocks by name and section."""
     if not chunk.sections:
         empty = np.empty(0, dtype=np.int32)
@@ -173,7 +200,7 @@ def _classify(chunk: Chunk, saved: int, scan: RegionScan, *, near_spawner: bool)
     lo = chunk.sections[0].y
     height = (chunk.sections[-1].y - lo + 1) * 16
     cats = np.zeros((height, 16, 16), dtype=np.uint8)
-    context = _generated(chunk, near_spawner=near_spawner)
+    context = _generated(chunk, near_spawner=near_spawner, likely=likely)
     seam = structure_built = 0
     for sec in chunk.sections:
         lut = np.fromiter(
@@ -339,7 +366,7 @@ def scan_region(job: RegionJob) -> RegionScan:
             scan.structures["dungeon"] += 1
         saved = item(header.timestamps, slot)
         near = (chunk.x, chunk.z) in spawners
-        pending.append(_classify(chunk, saved, scan, near_spawner=near))
+        pending.append(_classify(chunk, saved, scan, near_spawner=near, likely=_likely(chunk, job)))
     _finish(pending, job.region_x, job.region_z, scan)
     return scan
 

@@ -89,6 +89,8 @@ class PathSettings(BaseModel):
 class PlayerSettings(BaseModel):
     names: dict[str, str] = Field(default_factory=dict[str, str])
     """UUID -> display name; wins over names found in usercache files."""
+    gamertags: dict[str, str] = Field(default_factory=dict[str, str])
+    """Console gamertag -> display name, for worlds converted from a console (lce2java)."""
     usercache: list[Path] = Field(default_factory=list[Path])
 
     @field_validator("usercache")

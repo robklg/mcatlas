@@ -1,6 +1,7 @@
 """The top requirement: running everything leaves the world source bit-for-bit untouched."""
 
 import io
+import json
 import os
 import stat
 import tomllib
@@ -35,6 +36,7 @@ from mcatlas.app.analyze import AnalyzeOptions, analyze_sources
 from mcatlas.app.catalog import publish_site
 from mcatlas.app.export import export_atlas
 from mcatlas.app.render import RenderOptions, render_worlds
+from mcatlas.core.formats.console import lce_player_uuid
 from mcatlas.core.model import WorldFormat
 
 T0 = 1_676_199_600  # 2023-02-12 11:00 UTC
@@ -135,6 +137,61 @@ def _build_server_worlds(root: Path) -> None:
     (tower / "level.dat").unlink()
 
 
+CONVERTED = T0 + 200 * DAY
+"""When lce2java converted the Wii U world: every chunk and file of it carries this date."""
+
+
+def _build_wiiu_world(root: Path) -> None:
+    """A Wii U save converted by lce2java: the real history is only in wiiu_metadata.json."""
+    metadata = {
+        "source": {
+            "console": "Nintendo Wii U",
+            "date_in_save_name": "2017-01-14T12:00:00",
+            "wfs_file_times_utc": {"save_file": {"mtime": "2017-03-02T15:00:00Z"}},
+        },
+        "world": {
+            "name": "Noors kasteel",
+            "last_played_utc": "2010-01-01T00:00:00Z",  # the converter's wrong epoch
+            "time_played_ticks": 5 * 72_000,
+            "times_loaded": 4,
+            "players": [{"name": "NoorBouwt", "host": True}, {"name": "SamWii"}],
+        },
+        "conversion": {
+            "tool": "lce2java 0.1.0",
+            "converted_at_utc": datetime.fromtimestamp(CONVERTED, UTC).isoformat(),
+            "notes": ["11 of 2,916 chunks could not be recovered."],
+            "errors": ["a sign could not be converted"],
+        },
+    }
+    player = {"Pos": TypedList(6, [1.0, 64.0, 1.0]), "Dimension": "minecraft:overworld"}
+    # Converted from the old format: no structure references, only the stronghold's start.
+    old = chunk_nbt(
+        1,
+        0,
+        {(5, 40, 5): "minecraft:stone_bricks", (6, 61, 6): "minecraft:oak_planks"},
+        fill=[(0, 59, "minecraft:stone"), (60, 60, "minecraft:grass_block")],
+        inhabited=36_000,
+        status="minecraft:empty",
+    )
+    old["TerrainPopulated"] = Byte(1)
+    make_world(
+        root / "Noors kasteel [wiiu 80000001-170014120000]",
+        level_name="world",
+        last_played=datetime.fromtimestamp(CONVERTED, UTC),
+        chunks={"dimensions/minecraft/overworld/region": _chunks(3, CONVERTED)},
+        chunk_data={"dimensions/minecraft/overworld/region": [old]},
+        extra_files={
+            "data/StrongHold.dat": nbt_gz(
+                {"data": {"Features": {"[4,-2]": np.zeros(8, dtype=np.int8)}}}
+            ),
+            "wiiu_metadata.json": json.dumps(metadata).encode(),
+            f"players/data/{lce_player_uuid('NoorBouwt')}.dat": nbt_gz(player),
+            f"players/data/{lce_player_uuid('SamWii')}.dat": nbt_gz(player),
+            "data/minecraft/maps/0.dat": map_dat(0, 0, color=5),
+        },
+    )
+
+
 def _build_archive(root: Path) -> None:
     dream = make_world(
         root / "Alex en Sam's droom wereld",
@@ -207,6 +264,7 @@ def _build_archive(root: Path) -> None:
                 zf.write(p, p.relative_to(zip_src).as_posix())
     (root / "DOORS.zip").write_bytes(buf.getvalue())
     _build_server_worlds(root)
+    _build_wiiu_world(root)
     assert dream.exists()
 
 
@@ -248,7 +306,7 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     try:
         first = analyze_sources([source], store, AnalyzeOptions(tier=2, jobs=4))
         second = analyze_sources([source], store, AnalyzeOptions(tier=2, jobs=4))
-        names = {SAM: "SamCraft2024", ALEX: "AlexCraft2020"}
+        names = {SAM: "SamCraft2024", ALEX: "AlexCraft2020", lce_player_uuid("NoorBouwt"): "Noor"}
         catalog, _, _ = publish_site(store, StaticSiteWriter(out / "site"), names, UTC)
         # 3D maps: BlueMap (here a stand-in) only ever reads copies in its workspace.
         renderer = BlueMapRenderer(out / "render", java=fake_java(tmp_path), jar=FAKE_BLUEMAP)
@@ -277,8 +335,8 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert before.entries == after.entries
 
     # Rendering copied only what the maps need, and BlueMap saw only those copies.
-    # Six worlds get a map; the empty folder, console, 20w14∞ and level.dat-less worlds cannot.
-    assert rendered.rendered == rendered.maps == 6 and len(rendered.skipped) == 4
+    # Seven worlds get a map; the empty folder, console, 20w14∞ and level.dat-less worlds cannot.
+    assert rendered.rendered == rendered.maps == 7 and len(rendered.skipped) == 4
     assert again.rendered == 0 and again.copied_files == 0 and again.up_to_date == again.maps
     assert dutch.rendered == 0 and dutch.up_to_date == dutch.maps  # markers only
     seen = (out / "render" / "fake-bluemap.log").read_text().splitlines()
@@ -303,6 +361,7 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         "DOORS",
         "server export",
         "tower_export",
+        "Noors kasteel [wiiu 80000001-170014120000]",
     }
 
     dream = by_folder["Alex en Sam's droom wereld"]
@@ -382,8 +441,21 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert tower.build is not None  # tier 2 ran, although there is no level.dat
     assert tower.world_id not in catalog.renders
 
+    # A world converted from a Wii U: its history comes from the console, not the conversion.
+    wiiu = by_folder["Noors kasteel [wiiu 80000001-170014120000]"]
+    assert sorted(wiiu.activity.days) == [datetime(2017, 1, 14).date(), datetime(2017, 3, 2).date()]
+    assert wiiu.last_played == datetime(2017, 3, 2, 15, tzinfo=UTC)
+    assert (wiiu.play_hours, wiiu.sessions, wiiu.hours_per_session) == (5.0, 4, 1.25)
+    assert sorted((p.name, p.known) for p in wiiu.players) == [("Noor", True), ("SamWii", False)]
+    assert wiiu.origin is not None and wiiu.origin.console == "Nintendo Wii U"
+    assert wiiu.origin.created == datetime(2017, 1, 14).date()
+    assert wiiu.origin.notes == ["11 of 2,916 chunks could not be recovered."]
+    assert "console: a sign could not be converted" in wiiu.errors
+    assert wiiu.in_game_maps is not None and wiiu.in_game_maps.total == 1
+    assert wiiu.build is not None and wiiu.build.top_blocks == [("minecraft:oak_planks", 1)]
+
     # The durable atlas: plain files per world, the flat map and icon included.
-    assert exported.worlds == 10 and not exported.problems
+    assert exported.worlds == 11 and not exported.problems
     world_dir = out / "atlas" / "worlds" / dream.world_id
     facts = tomllib.loads((world_dir / "facts.toml").read_text())
     assert facts["schema_version"] == 1 and facts["build"]["built"] == 130
@@ -407,6 +479,13 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert "![Map 1](maps/map_1.png)" in (world_dir / "README.md").read_text()
     assert "Alex en Sam" in (out / "atlas" / "index.html").read_text()
     assert not (out / "atlas" / "annotations").exists()
+
+    wiiu_dir = out / "atlas" / "worlds" / wiiu.world_id
+    readme = (wiiu_dir / "README.md").read_text()
+    assert "Nintendo Wii U, converted to Java with lce2java 0.1.0" in readme
+    assert (
+        tomllib.loads((wiiu_dir / "facts.toml").read_text())["origin"]["tool"] == "lce2java 0.1.0"
+    )
 
     copy = by_folder["New World (3)"]
     assert any(r.world_id == dream.world_id and r.similarity > 0.9 for r in copy.related)

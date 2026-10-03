@@ -13,7 +13,7 @@ from mcatlas.core.discovery import parse_region_name
 from mcatlas.core.facts import FileFacts
 from mcatlas.core.model import SourceFile, WorldFiles, WorldLayout
 
-_MAP_ITEM = re.compile(r"(^|/)data/map_\d+\.dat$")
+_MAP_ITEM = re.compile(r"(^|/)data/(map_|minecraft/maps/)\d+\.dat$")
 _PLAYER_DIRS = ("playerdata/", "stats/", "advancements/", "players/")
 _WORLD_STATE = re.compile(r"(^|/)data/(minecraft|paper)/[^/]+\.dat$")
 

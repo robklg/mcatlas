@@ -20,6 +20,7 @@ from mcatlas.core.build import BuildMap, BuildSummary, summarize
 from mcatlas.core.dedupe import similarity
 from mcatlas.core.facts import (
     BlockFacts,
+    ConsoleFacts,
     Facts,
     FileFacts,
     InGameMap,
@@ -96,6 +97,34 @@ class InGameMaps(Facts):
     mosaics: list[MapMosaic] = Field(default_factory=list[MapMosaic])
 
 
+class Origin(Facts):
+    """Where a converted world came from, e.g. a Wii U save converted by lce2java."""
+
+    console: str | None = None
+    original_name: str | None = None
+    created: date | None = None
+    tool: str | None = None
+    converted_at: datetime | None = None
+    bundled_map: bool = False
+    """Started from a map that came with the game: its play time is not (only) ours."""
+    notes: list[str] = Field(default_factory=list[str])
+
+
+def _origin(console: ConsoleFacts, tz: tzinfo) -> Origin:
+    saved = console.last_saved.astimezone(tz).date() if console.last_saved else None
+    created = console.save_name_date
+    return Origin(
+        console=console.console,
+        original_name=console.original_name,
+        # A re-saved or copied save can carry a later date in its name than its last save.
+        created=created if created is not None and (saved is None or created <= saved) else None,
+        tool=console.tool,
+        converted_at=console.converted_at,
+        bundled_map=console.bundled_map,
+        notes=console.notes,
+    )
+
+
 MAX_MAP_ERRORS = 5
 
 
@@ -143,6 +172,8 @@ class WorldEntry(Facts):
     """Longest average session among the counted players."""
     afk_suspect: bool = False
     """Play time is probably inflated by a game left running."""
+    origin: Origin | None = None
+    """For a world converted from a console: where it came from."""
     items_used: int = 0
     activity: ActivityProfile = Field(default_factory=ActivityProfile)
     build: BuildSummary | None = None
@@ -178,12 +209,18 @@ class Catalog(Facts):
     """3D maps (BlueMap) by world, with their flat top-down images."""
 
 
-def _player(p: PlayerFacts, host: PlayerState | None, names: Mapping[str, str]) -> PlayerSummary:
+def _player(
+    p: PlayerFacts,
+    host: PlayerState | None,
+    names: Mapping[str, str],
+    labels: Mapping[str, str] | None = None,
+) -> PlayerSummary:
+    """`labels` name players that are not ours by config, e.g. a console's gamertags."""
     state = p.state or (host if host and host.uuid == p.uuid else None)
     stats = p.stats
     return PlayerSummary(
         uuid=p.uuid,
-        name=names.get(p.uuid),
+        name=names.get(p.uuid) or (labels or {}).get(p.uuid),
         known=p.uuid in names,
         play_hours=round(stats.play_ticks / TICKS_PER_HOUR, 2) if stats else 0.0,
         sessions=stats.sessions if stats else None,
@@ -204,6 +241,7 @@ class _Parsed:
     files: FileFacts | None
     blocks: BlockFacts | None
     maps: MapFacts | None
+    console: ConsoleFacts | None
 
 
 def _parse(stored: StoredWorld) -> _Parsed:
@@ -218,6 +256,7 @@ def _parse(stored: StoredWorld) -> _Parsed:
     files = parsed.get(analyze.FILES.name)
     blocks = parsed.get(analyze.BLOCKS.name)
     maps = parsed.get(analyze.MAPS.name)
+    console = parsed.get(analyze.CONSOLE.name)
     return _Parsed(
         stored=stored,
         level=level if isinstance(level, LevelFacts) else None,
@@ -226,6 +265,7 @@ def _parse(stored: StoredWorld) -> _Parsed:
         files=files if isinstance(files, FileFacts) else None,
         blocks=blocks if isinstance(blocks, BlockFacts) else None,
         maps=maps if isinstance(maps, MapFacts) else None,
+        console=console if isinstance(console, ConsoleFacts) else None,
     )
 
 
@@ -309,7 +349,9 @@ def build_entry(
     stored, level, players, regions, files = p.stored, p.level, p.players, p.regions, p.files
     errors = [f"{name}: {msg}" for name, msg in stored.errors.items()]
     host = level.host_player if level else None
-    player_list = [_player(pl, host, names) for pl in players.players] if players else []
+    console = p.console
+    labels = {c.uuid: c.name for c in console.players} if console else {}
+    player_list = [_player(pl, host, names, labels) for pl in players.players] if players else []
     if players:
         errors += players.errors
     if regions:
@@ -329,9 +371,21 @@ def build_entry(
     ours = [s for s in player_list if s.known and s.play_hours > 0]
     counted = ours or player_list
     play_hours = round(sum(s.play_hours for s in counted), 2)
+    play_hours_all = round(sum(s.play_hours for s in player_list), 2)
     items_used = sum(s.items_used for s in counted)
     sessions = sum(s.sessions or 0 for s in counted)
     per_session = _hours_per_session(counted)
+    last_played = level.last_played if level else None
+    if console is not None:
+        # Console saves keep no per-player statistics; the world's own clock and load
+        # counter are the best measure. Java's LastPlayed is the conversion date.
+        last_played = console.last_saved
+        errors += [f"console: {problem}" for problem in console.problems]
+        if not play_hours and console.play_ticks and not console.bundled_map:
+            play_hours = play_hours_all = round(console.play_ticks / TICKS_PER_HOUR, 2)
+        if not sessions and console.times_loaded:
+            sessions = console.times_loaded
+            per_session = round(play_hours / sessions, 2) if play_hours else None
 
     return WorldEntry(
         world_id=stored.world_id,
@@ -351,7 +405,7 @@ def build_entry(
         modded=level.was_modded if level else None,
         datapacks=[d for d in (level.datapacks if level else []) if d not in _BUILTIN_PACKS],
         seed=level.seed if level else None,
-        last_played=level.last_played if level else None,
+        last_played=last_played,
         spawn=level.spawn if level else None,
         size_bytes=files.total_size if files else stored.total_size,
         files=files.files if files else 0,
@@ -371,12 +425,13 @@ def build_entry(
         ],
         players=player_list,
         play_hours=play_hours,
-        play_hours_all=round(sum(s.play_hours for s in player_list), 2),
+        play_hours_all=play_hours_all,
         foreign_players=sum(1 for s in player_list if not s.known and s.play_hours > 0),
         sessions=sessions,
         days_upper=max(sessions, activity.distinct_days) if sessions else None,
         hours_per_session=per_session,
         afk_suspect=per_session is not None and per_session >= AFK_SESSION_HOURS,
+        origin=_origin(console, tz) if console else None,
         items_used=items_used,
         activity=activity,
         build=build,
@@ -447,7 +502,14 @@ def build_catalog(
     notes = dict(annotations or {})
     parsed = [_parse(s) for s in stored]
     raw_days = [
-        collect_days(regions=p.regions, files=p.files, players=p.players, level=p.level, tz=tz)
+        collect_days(
+            regions=p.regions,
+            files=p.files,
+            players=p.players,
+            level=p.level,
+            tz=tz,
+            console=p.console,
+        )
         for p in parsed
     ]
     ignored = archive_artifact_days(raw_days) | ignore_file_days

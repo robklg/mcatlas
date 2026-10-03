@@ -30,6 +30,10 @@ LEVEL_DATA_FILES = ("data/minecraft/world_gen_settings.dat", "data/paper/level_o
 """Since 26.1 the seed and much of the world state moved out of level.dat into these files; a
 Paper server writes no level.dat at all for its extra (Multiverse) worlds."""
 
+CONSOLE_METADATA = "wiiu_metadata.json"
+"""Written by lce2java next to a world it converted from a Wii U save: dates, play time and
+players of the original, which the converted Java files no longer carry."""
+
 NETHER_SUFFIX = "_nether"
 END_SUFFIX = "_the_end"
 
@@ -217,6 +221,7 @@ def classify(files: Iterable[SourceFile]) -> WorldLayout:
         format=fmt,
         level_dat=level_dat,
         level_data=level_data,
+        console_metadata=CONSOLE_METADATA if CONSOLE_METADATA in by_path else None,
         dimensions=tuple(dimensions),
         player_data=tuple(sorted(player_data, key=lambda f: f.relpath)),
         stats=tuple(sorted(stats, key=lambda f: f.relpath)),

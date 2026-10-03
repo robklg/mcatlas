@@ -135,6 +135,8 @@ class WorldLayout:
     """Relative path of the level file that was found (level.dat, special_level.dat, ...)."""
     level_data: tuple[str, ...]
     """The 26.1+ files that hold what level.dat used to (seed, spawn, game mode), if any."""
+    console_metadata: str | None
+    """What a converter kept from a console save (`wiiu_metadata.json`), if any."""
     dimensions: tuple[DimensionLayout, ...]
     player_data: tuple[SourceFile, ...]
     stats: tuple[SourceFile, ...]
@@ -152,6 +154,12 @@ def slugify(text: str, max_len: int = 48) -> str:
     ascii_text = unicodedata.normalize("NFKD", plain).encode("ascii", "ignore").decode()
     slug = _SLUG_STRIP.sub("-", ascii_text.lower()).strip("-")
     return slug[:max_len].rstrip("-") or "world"
+
+
+def fold(text: str) -> str:
+    """For matching names: case-insensitive, and NFC, because SMB can report names in NFD
+    (an "e" plus a combining diaeresis instead of "ë")."""
+    return unicodedata.normalize("NFC", text).casefold()
 
 
 def leaf_name(relpath: str) -> str:

@@ -32,7 +32,8 @@ MAX_MOSAICS: Final = 3
 """Mosaics per dimension: the areas with the most maps."""
 NEAR: Final = 512
 """Maps closer than this many blocks belong to one area (one mosaic)."""
-MAP_FILE: Final = re.compile(r"^data/map_(\d+)\.dat$")
+MAP_FILE: Final = re.compile(r"^data/(?:map_|minecraft/maps/)(\d+)\.dat$")
+"""`data/map_<n>.dat`; since 26.1 `data/minecraft/maps/<n>.dat`."""
 
 # net.minecraft.world.level.material.MapColor, checked against the 26.3 client.
 BASE_COLORS: Final = (

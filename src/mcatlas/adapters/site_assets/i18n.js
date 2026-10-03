@@ -77,6 +77,10 @@ window.MCATLAS_I18N = {
     strip_aria: "Activiteit per week: {n} actieve dagen, {period}",
     zoom_aria: "Activiteit in de gekozen periode: {n} dagen",
     sig_chunk_saves: "chunks opgeslagen", sig_advancements: "advancements", sig_file_saves: "bestanden",
+    sig_console_saves: "keer opgeslagen op de console",
+    kv_origin: "Herkomst", origin_value: "{console}, omgezet naar Java met {tool} op {date}",
+    origin_created: "gemaakt op {date}",
+    origin_bundled: "begonnen vanaf een kaart die bij het spel zat: de speeltijd is niet (alleen) van ons",
     last_played_only: "laatst gespeeld",
 
     badge_afk: "mogelijk AFK",
@@ -318,6 +322,10 @@ window.MCATLAS_I18N = {
     strip_aria: "Activity per week: {n} active days, {period}",
     zoom_aria: "Activity in the chosen period: {n} days",
     sig_chunk_saves: "chunks saved", sig_advancements: "advancements", sig_file_saves: "files",
+    sig_console_saves: "saved on the console",
+    kv_origin: "Origin", origin_value: "{console}, converted to Java with {tool} on {date}",
+    origin_created: "created on {date}",
+    origin_bundled: "started from a map that came with the game: its play time is not (only) ours",
     last_played_only: "last played",
 
     badge_afk: "possibly AFK",

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from mcatlas.core import analyze
 from mcatlas.core.discovery import classify
 from mcatlas.core.facts import Facts, ImageFacts
-from mcatlas.core.model import Mapper, WorldLayout, WorldListing, serial_map
+from mcatlas.core.model import Mapper, WorldLayout, WorldListing, fold, serial_map
 from mcatlas.ports import FactStore, WorldSource
 
 ICON = "icon.png"
@@ -52,9 +52,9 @@ def _quiet(_message: str) -> None:
 
 
 def _matches(listing: WorldListing, pattern: str) -> bool:
-    pat = pattern.casefold()
+    pat = fold(pattern)
     return any(
-        fnmatch.fnmatch(candidate.casefold(), pat)
+        fnmatch.fnmatch(fold(candidate), pat)
         for candidate in (listing.folder_name, listing.relpath, str(listing.world_id))
     )
 

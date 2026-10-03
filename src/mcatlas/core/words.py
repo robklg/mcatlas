@@ -86,6 +86,11 @@ class Words:
     yes: str
     datapacks: str
     last_opened: str
+    origin: str
+    origin_value: str
+    """`{console}`, `{tool}`, `{date}`: a world converted from a console save."""
+    origin_created: str
+    origin_bundled: str
     size: str
     size_value: str
     importance_label: str
@@ -309,6 +314,12 @@ NL: Final = Words(
     yes="ja",
     datapacks="Datapacks",
     last_opened="Laatst geopend",
+    origin="Herkomst",
+    origin_value="{console}, omgezet naar Java met {tool} op {date}",
+    origin_created="gemaakt op {date}",
+    origin_bundled=(
+        "begonnen vanaf een kaart die bij het spel zat: de speeltijd is niet (alleen) van ons"
+    ),
     size="Grootte",
     size_value="{mb} MB in {files}",
     importance_label="Belangrijkheid",
@@ -622,6 +633,10 @@ EN: Final = Words(
     yes="yes",
     datapacks="Datapacks",
     last_opened="Last opened",
+    origin="Origin",
+    origin_value="{console}, converted to Java with {tool} on {date}",
+    origin_created="created on {date}",
+    origin_bundled="started from a map that came with the game: its play time is not (only) ours",
     size="Size",
     size_value="{mb} MB in {files}",
     importance_label="Importance",

@@ -22,7 +22,7 @@ from numpy.typing import NDArray
 
 from mcatlas.core import nbt
 from mcatlas.core.anvil.region import SECTOR, RegionHeader
-from mcatlas.core.formats.access import compound, compounds, int_, list_, str_
+from mcatlas.core.formats.access import bool_, compound, compounds, int_, list_, str_
 from mcatlas.core.npx import item
 
 BLOCKS_PER_SECTION: Final = 4096
@@ -64,6 +64,8 @@ class Chunk:
     """Signs, chests, command blocks, ... (raw NBT, for text extraction)."""
     entities: tuple[nbt.NbtCompound, ...] = ()
     """Entities stored inside the chunk (before 1.17; later they live in entities/)."""
+    legacy: bool = False
+    """Upgraded from before 1.13 and not loaded since: it has no structure references."""
 
 
 def chunk_bytes(region: bytes, header: RegionHeader, slot: int) -> bytes | None:
@@ -110,7 +112,10 @@ def unpack(
 def _section(
     y: int, palette_nbt: list[nbt.NbtCompound], data: nbt.NbtValue | None, *, spanning: bool
 ) -> Section | None:
-    palette = tuple(str_(entry, "Name") or "minecraft:air" for entry in palette_nbt)
+    # Block states are {Name, Properties}; chunks saved by 26.3 write {id, properties}.
+    palette = tuple(
+        str_(entry, "Name") or str_(entry, "id") or "minecraft:air" for entry in palette_nbt
+    )
     if not palette:
         return None
     if len(palette) == 1:
@@ -167,11 +172,15 @@ def parse_chunk(root: nbt.NbtCompound) -> Chunk:
             sections.append(parsed)
 
     status = str_(level, "Status") or ""
+    # A chunk upgraded from before 1.13 keeps its old TerrainPopulated flag. Set, it was fully
+    # generated, whatever status the upgrade gave it: "features" until the game first lights
+    # it, or "empty" while a default world still has to be extended below y=0 (1.18+).
+    populated = bool_(level, "TerrainPopulated")
     return Chunk(
         x=int_(level, "xPos") or 0,
         z=int_(level, "zPos") or 0,
         data_version=data_version,
-        full=status in FULL_STATUSES,
+        full=status in FULL_STATUSES or populated is True,
         inhabited_ticks=int_(level, "InhabitedTime") or 0,
         sections=tuple(sorted(sections, key=lambda s: s.y)),
         structures=_structures(compound(level, "structures" if modern else "Structures")),
@@ -179,4 +188,5 @@ def parse_chunk(root: nbt.NbtCompound) -> Chunk:
             compounds(list_(level, "block_entities" if modern else "TileEntities"))
         ),
         entities=tuple(compounds(list_(level, "Entities"))),
+        legacy=populated is not None,
     )

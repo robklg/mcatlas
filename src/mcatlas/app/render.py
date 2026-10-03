@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 from mcatlas.core.catalog import WorldEntry
 from mcatlas.core.discovery import classify
-from mcatlas.core.model import Generator, Language, WorldFormat
+from mcatlas.core.model import Generator, Language, WorldFormat, fold
 from mcatlas.core.render import MIN_DATA_VERSION, MapPlan, plan_maps, staged_path, without_texts
 from mcatlas.ports import Renderer, WorldSource
 
@@ -47,10 +47,9 @@ def _quiet(_message: str) -> None:
 def _selected(entry: WorldEntry, pattern: str | None) -> bool:
     if pattern is None:
         return True
-    pat = pattern.casefold()
+    pat = fold(pattern)
     return any(
-        fnmatch.fnmatch(c.casefold(), pat)
-        for c in (entry.folder_name, entry.relpath, entry.world_id)
+        fnmatch.fnmatch(fold(c), pat) for c in (entry.folder_name, entry.relpath, entry.world_id)
     )
 
 

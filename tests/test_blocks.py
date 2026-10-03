@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from builders import chunk_nbt, nbt, pack, region
+from builders import Byte, chunk_nbt, nbt, pack, region
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -25,6 +25,32 @@ def test_unpack_matches_naive_packer(bits, spanning, seed):
 def test_unpack_rejects_short_data():
     with pytest.raises(ChunkError):
         unpack(np.zeros(3, dtype=np.int64), 5, spanning=False)
+
+
+def test_palette_entries_saved_by_26_3():
+    """26.3 writes palette entries as {id, properties} instead of {Name, Properties}."""
+    raw = chunk_nbt(0, 0, {(1, 70, 2): "minecraft:glass"}, fill=GROUND)
+    for section in raw["sections"].items:
+        for entry in section["block_states"]["palette"].items:
+            entry["id"] = entry.pop("Name")
+    names = {n for sec in parse_chunk(decode(nbt(raw))).sections for n in sec.palette}
+    assert {"minecraft:glass", STONE, GRASS} <= names
+
+
+@pytest.mark.parametrize(
+    ("status", "populated", "full"),
+    [
+        ("minecraft:features", None, False),  # the edge of explored land
+        ("minecraft:features", 1, True),  # upgraded from before 1.13, not lit yet
+        ("minecraft:empty", 1, True),  # upgraded, waiting to be extended below y=0
+        ("minecraft:empty", 0, False),
+    ],
+)
+def test_chunks_upgraded_from_the_old_format(status, populated, full):
+    raw = chunk_nbt(0, 0, {}, fill=GROUND, status=status)
+    if populated is not None:
+        raw["TerrainPopulated"] = Byte(populated)
+    assert parse_chunk(decode(nbt(raw))).full is full
 
 
 @pytest.mark.parametrize("data_version", [3465, 2230, 2586])  # 1.20.1, 1.15.2 (spanning), 1.16.5
@@ -102,6 +128,32 @@ def test_open_pit_counts_as_underground_but_wide_valley_does_not():
     assert (pit_row.built, pit_row.below) == (16, 16)  # filled in by the closing
     valley_row = _row(scan, 5, 0)
     assert (valley_row.built, valley_row.below) == (1, 0)
+
+
+def test_converted_chunks_assume_the_structures_of_their_dimension():
+    """Old-format chunks (a Wii U world) have no structure references: a nether fortress's
+    own blocks are assumed generated, other building blocks still count."""
+    blocks = {(5, 61, 5): "minecraft:nether_bricks", (6, 61, 6): "minecraft:oak_planks"}
+
+    def scan(*, legacy: bool, likely: tuple[str, ...] = (), strongholds=()) -> RegionScan:
+        raw = chunk_nbt(0, 0, blocks, fill=GROUND, inhabited=VISITED)
+        if legacy:
+            raw["TerrainPopulated"] = Byte(1)
+        data = region({(0, 0): (raw, 1_693_591_200)})
+        return scan_region(RegionJob("r.0.0.mca", 0, 0, data, likely, strongholds))
+
+    assert scan(legacy=True, likely=("likely_fortress",)).blocks == {"minecraft:oak_planks": 1}
+    # Without the assumption, or in a chunk saved by Java itself, both count.
+    assert len(scan(legacy=True).blocks) == 2
+    assert len(scan(legacy=False, likely=("likely_fortress",)).blocks) == 2
+
+    bricks = {(5, 40, 5): "minecraft:stone_bricks", (6, 40, 6): "minecraft:oak_planks"}
+    for start, expected in (((7, -7), 1), ((8, 0), 2)):
+        raw = chunk_nbt(0, 0, bricks, fill=GROUND, inhabited=VISITED)
+        raw["TerrainPopulated"] = Byte(1)
+        data = region({(0, 0): (raw, 1_693_591_200)})
+        result = scan_region(RegionJob("r.0.0.mca", 0, 0, data, (), (start,)))
+        assert len(result.blocks) == expected  # within 7 chunks of a stronghold's start
 
 
 def test_void_structures_dungeons_and_proto_chunks():

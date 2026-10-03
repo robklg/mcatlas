@@ -7,7 +7,7 @@ from mcatlas.core.discovery import (
     merge_all_sibling_roots,
     merge_sibling_roots,
 )
-from mcatlas.core.model import SourceFile, WorldFormat, make_world_id, slugify
+from mcatlas.core.model import SourceFile, WorldFormat, fold, make_world_id, slugify
 
 
 def files(*paths: str, size: int = 9000) -> list[SourceFile]:
@@ -196,3 +196,7 @@ def test_not_applicable_is_cached_apart():
     empty = classify(files("session.lock"))
     assert analyze.cache_key(analyze.BLOCKS, level_less, "f") == "f"
     assert analyze.cache_key(analyze.BLOCKS, empty, "f") == "f/n-a"
+
+
+def test_fold_matches_decomposed_names():
+    assert fold("Noe\u0308l") == fold("NOËL") == "noël"

@@ -299,7 +299,7 @@
     });
     return row;
   }
-  const SIGNALS = ["chunk_saves", "advancements", "file_saves"];
+  const SIGNALS = ["chunk_saves", "advancements", "file_saves", "console_saves"];
   function zoomStrip(w, ax, height) {
     const W = 1000; const H = height;
     const bw = W / ax.count; const gap = ax.count > 300 ? 0.5 : 1.5;
@@ -334,6 +334,15 @@
     });
     svg.addEventListener("mouseleave", hideTip);
     return h("div", { class: "strip-wrap", style: "position:relative" }, svg);
+  }
+
+  // A world converted from a console save: where it came from, and what to keep in mind.
+  function originText(o) {
+    const parts = [t("origin_value", { console: o.console || "?", tool: o.tool || "?",
+      date: o.converted_at ? DATE.format(new Date(o.converted_at)) : "?" })];
+    if (o.created) parts.push(t("origin_created", { date: DATE.format(new Date(o.created)) }));
+    if (o.bundled_map) parts.push(t("origin_bundled"));
+    return [...parts, ...o.notes].join("; ");
   }
 
   function icon(w, cls) {
@@ -1093,7 +1102,8 @@
       h("td", { class: "num" }, d.sig.chunk_saves || "–"),
       h("td", { class: "num" }, d.sig.file_saves || "–"),
       h("td", { class: "num" }, d.sig.advancements || "–"),
-      h("td", null, d.sig.last_played ? t("last_played_only") : "")));
+      h("td", null, [d.sig.last_played ? t("last_played_only") : null,
+        d.sig.console_saves ? t("sig_console_saves") : null].filter(Boolean).join(", "))));
 
     const related = w.related.length ? h("ul", null, w.related.map((r) => h("li", null,
       h("a", { class: "rel", onclick: () => { const o = byId.get(r.world_id); if (o) openDetail(o); } }, r.folder_name),
@@ -1135,6 +1145,7 @@
         [t("kv_cheats"), w.cheats === null ? null : (w.cheats ? t("on") : t("off"))],
         [t("kv_seed"), w.seed !== null && w.seed !== undefined ? String(w.seed) : null],
         [t("kv_last_played"), w.last_played ? DATE.format(new Date(w.last_played)) : null],
+        [t("kv_origin"), w.origin ? originText(w.origin) : null],
         [t("kv_datapacks"), w.datapacks.length ? w.datapacks.join(", ") : null],
         [t("kv_session"), w.hours_per_session ? `${t("kv_session_value", { h: hours(w.hours_per_session) })}${w.afk_suspect ? t("kv_afk") : ""}` : null],
         [t("kv_maps"), w.map_items || null],

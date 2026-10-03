@@ -1,6 +1,6 @@
 """Facts produced by analyzers. These pydantic models are also the persisted JSON schema."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,6 +41,42 @@ class LevelFacts(Facts):
     datapacks: list[str] = Field(default_factory=list[str])
     enabled_features: list[str] = Field(default_factory=list[str])
     host_player: PlayerState | None = None
+
+
+class ConsolePlayer(Facts):
+    name: str
+    """Gamertag on the console."""
+    uuid: str
+    """UUID of the Java player file the converter wrote for this gamertag."""
+    host: bool = False
+
+
+class ConsoleFacts(Facts):
+    """A world converted from a console edition, as described by the converter's metadata.
+
+    The converted Java files carry the conversion date everywhere (file times, chunk saves,
+    LastPlayed), so dates, play time and players come from here instead.
+    """
+
+    metadata_file: str
+    console: str | None = None
+    original_name: str | None = None
+    """The world's name in the console's world list."""
+    save_name_date: date | None = None
+    """Console-local date in the save's file name: usually when the world was created."""
+    last_saved: datetime | None = None
+    """When the console last wrote the save: the last time the world was played."""
+    play_ticks: int | None = None
+    """World clock: it only runs while the world is loaded, so roughly the time played."""
+    times_loaded: int | None = None
+    bundled_map: bool = False
+    """Started from a map that came with the game: clock and dates are partly its makers'."""
+    players: list[ConsolePlayer] = Field(default_factory=list[ConsolePlayer])
+    tool: str | None = None
+    converted_at: datetime | None = None
+    notes: list[str] = Field(default_factory=list[str])
+    problems: list[str] = Field(default_factory=list[str])
+    """Conversion errors (e.g. a sign whose text could not be converted)."""
 
 
 class PlayerStats(Facts):

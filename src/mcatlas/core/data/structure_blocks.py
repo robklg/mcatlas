@@ -10,6 +10,10 @@ over completeness inside them.
 Dungeons (monster rooms) are features, not structures: chunks with a spawner (or next to one)
 use `DUNGEON`. Chunks where players spent little time use the generic test as well, because some
 upgraded worlds lost their structure references (a whole village without any).
+
+Chunks converted from the old format (e.g. a Wii U world) carry no structure references at all.
+There the scanner assumes the structures a dimension is full of ("likely_" contexts): with exact
+palettes, so that only a fortress's, end city's or stronghold's own blocks are hidden.
 """
 
 from typing import Final
@@ -21,7 +25,7 @@ def _ns(*names: str) -> frozenset[str]:
     return frozenset(f"minecraft:{n}" for n in names)
 
 
-VERSION: Final = _NATURAL_VERSION * 100 + 2
+VERSION: Final = _NATURAL_VERSION * 100 + 3
 
 MINESHAFT: Final = _ns(
     "oak_planks",
@@ -36,6 +40,49 @@ MINESHAFT: Final = _ns(
 )
 
 DUNGEON: Final = _ns("cobblestone", "mossy_cobblestone", "spawner", "chest")
+
+LIKELY: Final[dict[str, frozenset[str]]] = {
+    "likely_fortress": _ns(
+        "nether_bricks", "nether_brick_fence", "nether_brick_stairs", "nether_wart", "spawner"
+    ),
+    "likely_end_city": _ns(
+        "purpur_block",
+        "purpur_pillar",
+        "purpur_stairs",
+        "purpur_slab",
+        "end_stone_bricks",
+        "end_rod",
+        "magenta_stained_glass",
+        "magenta_banner",
+        "magenta_wall_banner",
+        "dragon_head",
+        "dragon_wall_head",
+        "brewing_stand",
+        "ladder",
+        "chest",
+    ),
+    "likely_stronghold": _ns(
+        "stone_bricks",
+        "mossy_stone_bricks",
+        "cracked_stone_bricks",
+        "chiseled_stone_bricks",
+        "infested_stone_bricks",
+        "infested_mossy_stone_bricks",
+        "infested_cracked_stone_bricks",
+        "infested_chiseled_stone_bricks",
+        "stone_brick_stairs",
+        "stone_brick_slab",
+        "smooth_stone_slab",
+        "iron_bars",
+        "iron_door",
+        "stone_button",
+        "bookshelf",
+        "cobweb",
+        "end_portal_frame",
+        "spawner",
+    ),
+}
+"""Exact palettes of structures assumed in chunks converted from the old format."""
 
 _GENERIC_PARTS: Final = (
     "_planks",
@@ -175,6 +222,9 @@ def is_structure_block(name: str, structures: tuple[str, ...]) -> bool:
                 return True
         elif s == "dungeon":
             if name in DUNGEON:
+                return True
+        elif s in LIKELY:
+            if name in LIKELY[s]:
                 return True
         elif s.startswith("mineshaft"):
             if name in MINESHAFT:

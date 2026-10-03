@@ -46,7 +46,8 @@ from mcatlas.config import (
 from mcatlas.core.catalog import Catalog, WorldEntry
 from mcatlas.core.discovery import classify
 from mcatlas.core.facts import TextEntry
-from mcatlas.core.model import Language, WorldId, serial_map
+from mcatlas.core.formats.console import lce_player_uuid
+from mcatlas.core.model import Language, WorldId, fold, serial_map
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -103,6 +104,7 @@ def _store(settings: Settings) -> SqliteFactStore:
 
 def _names(settings: Settings) -> dict[str, str]:
     names = load_names(settings.players.usercache)
+    names.update({lce_player_uuid(tag): name for tag, name in settings.players.gamertags.items()})
     names.update({k.lower(): v for k, v in settings.players.names.items()})
     return names
 
@@ -645,7 +647,7 @@ def _load_entries(settings: Settings) -> list[WorldEntry]:
 
 
 def _matches(entry: WorldEntry, text: str) -> bool:
-    needle = text.casefold()
+    needle = fold(text)
     hay = [
         entry.name,
         entry.folder_name,
@@ -655,7 +657,7 @@ def _matches(entry: WorldEntry, text: str) -> bool:
     ]
     if entry.annotation is not None:
         hay += [entry.annotation.title, entry.annotation.note, *entry.annotation.tags]
-    return any(needle in h.casefold() for h in hay if h)
+    return any(needle in fold(h) for h in hay if h)
 
 
 @app.command()
@@ -663,7 +665,7 @@ def search(text: str) -> None:
     """Find worlds by (folder) name, path, player name, or text on signs, in books and names."""
     settings = _settings()
     catalog = _load(settings)
-    needle = text.casefold()
+    needle = fold(text)
     table = Table("score", "name", "folder", "days", "period", "play h")
     hits: list[tuple[WorldEntry, list[TextEntry]]] = []
     for e in catalog.worlds:
@@ -697,7 +699,7 @@ def show(world: str) -> None:
     """Show everything known about one world (id, folder name or part of it)."""
     settings = _settings()
     matches = [e for e in _load_entries(settings) if _matches(e, world)]
-    exact = [e for e in matches if world in (e.world_id, e.folder_name)]
+    exact = [e for e in matches if fold(world) in (fold(e.world_id), fold(e.folder_name))]
     chosen = exact or matches
     if len(chosen) != 1:
         err.print(

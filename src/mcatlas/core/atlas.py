@@ -22,7 +22,7 @@ from pydantic import Field
 
 from mcatlas.core.annotations import Annotation
 from mcatlas.core.build import BuildSite
-from mcatlas.core.catalog import Catalog, WorldEntry
+from mcatlas.core.catalog import Catalog, Origin, WorldEntry
 from mcatlas.core.chunkmap import ChunkMaps, chunk_maps
 from mcatlas.core.document import (
     Block,
@@ -262,6 +262,8 @@ class AtlasWorld(Facts):
     datapacks: list[str] = Field(default_factory=list[str])
     seed: int | None = None
     last_played: datetime | None = None
+    origin: Origin | None = None
+    """For a world converted from a console save: where it came from."""
     spawn: list[int] | None = None
     size_bytes: int = 0
     files: int = 0
@@ -359,6 +361,7 @@ def atlas_world(
         datapacks=e.datapacks,
         seed=e.seed,
         last_played=e.last_played,
+        origin=e.origin,
         spawn=list(e.spawn) if e.spawn else None,
         size_bytes=e.size_bytes,
         files=e.files,
@@ -662,6 +665,16 @@ def _play_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
     return rows
 
 
+def _origin(w: Words, o: Origin) -> str:
+    converted = day(w, o.converted_at.date()) if o.converted_at else "?"
+    parts = [w.origin_value.format(console=o.console or "?", tool=o.tool or "?", date=converted)]
+    if o.created is not None:
+        parts.append(w.origin_created.format(date=day(w, o.created)))
+    if o.bundled_map:
+        parts.append(w.origin_bundled)
+    return "; ".join([*parts, *o.notes])
+
+
 def _world_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
     rows: list[tuple[str, Text]] = []
     where = ", ".join(_dimension(w, d.key) for d in e.dimensions)
@@ -685,6 +698,8 @@ def _world_rows(w: Words, e: WorldEntry) -> list[tuple[str, Text]]:
         rows.append(("Spawn", Code(" ".join(str(c) for c in e.spawn))))
     if e.last_played is not None:
         rows.append((w.last_opened, day(w, e.last_played.date())))
+    if e.origin is not None:
+        rows.append((w.origin, _origin(w, e.origin)))
     size = w.size_value.format(
         mb=num(w, e.size_bytes / 1_048_576, 1), files=count(w, e.files, w.files)
     )

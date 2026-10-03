@@ -35,6 +35,10 @@ usercache = ["~/Library/Application Support/minecraft/usercache.json"]
 # Explicit names win over usercache entries.
 # "0b0e0b0e-0000-4000-8000-000000000003" = "Noor"
 
+[players.gamertags]
+# Worlds converted from a console (Wii U, by lce2java) know their players by gamertag.
+# "NoorBouwt" = "Noor"
+
 [analysis]
 timezone = "Europe/Amsterdam"   # turns timestamps into calendar days
 jobs = 8                        # worlds analyzed in parallel

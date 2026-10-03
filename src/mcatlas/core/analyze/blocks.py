@@ -5,6 +5,7 @@ Region files are read whole, in small batches (bounded memory), through the read
 composition root can spread it over worker processes. Workers only ever receive bytes.
 """
 
+import re
 from collections import Counter
 from collections.abc import Callable
 from itertools import batched
@@ -16,6 +17,9 @@ from mcatlas.core.discovery import parse_region_name
 from mcatlas.core.facts import BlockFacts, ChunkTable, DimensionBlocks, TextEntry
 from mcatlas.core.formats.access import compound
 from mcatlas.core.model import (
+    NETHER,
+    OVERWORLD,
+    THE_END,
     DimensionLayout,
     Mapper,
     SourceFile,
@@ -23,6 +27,14 @@ from mcatlas.core.model import (
     WorldLayout,
 )
 from mcatlas.core.texts import FoundText, texts_of
+
+STRONGHOLD_FILE = "data/stronghold.dat"
+_CHUNK_KEY = re.compile(r"^\[(-?\d+),(-?\d+)\]$")
+LIKELY_BY_DIMENSION: dict[str, tuple[str, ...]] = {
+    NETHER: ("likely_fortress",),
+    THE_END: ("likely_end_city",),
+}
+"""Structures assumed in old-format chunks without references, per dimension."""
 
 BATCH = 16
 """Region files read per round trip; at most ~16 x 11 MB in memory per world."""
@@ -93,6 +105,9 @@ def _scan_files(
     scanner: Callable[[RegionJob], RegionScan],
     mapper: Mapper,
     errors: list[str],
+    *,
+    likely: tuple[str, ...] = (),
+    strongholds: tuple[tuple[int, int], ...] = (),
 ) -> list[RegionScan]:
     regions: list[tuple[str, int, int, int]] = []
     for f in region_files:
@@ -107,7 +122,7 @@ def _scan_files(
             if isinstance(blob, OSError):
                 errors.append(f"{rel}: {blob}")
             else:
-                jobs.append(RegionJob(rel, rx, rz, blob))
+                jobs.append(RegionJob(rel, rx, rz, blob, likely, strongholds))
         for scan in mapper(scanner, jobs):
             errors.extend(scan.errors)
             scans.append(scan)
@@ -120,12 +135,38 @@ def _dimension(
     mapper: Mapper,
     errors: list[str],
     texts: list[TextEntry],
+    *,
+    strongholds: tuple[tuple[int, int], ...],
 ) -> DimensionBlocks:
-    scans = _scan_files(files, dim.region_files, scan_region, mapper, errors)
+    likely = LIKELY_BY_DIMENSION.get(dim.key, ())
+    held = strongholds if dim.key == OVERWORLD else ()
+    scans = _scan_files(
+        files, dim.region_files, scan_region, mapper, errors, likely=likely, strongholds=held
+    )
     entity_scans = _scan_files(files, dim.entity_files, scan_entities, mapper, errors)
     for scan in (*scans, *entity_scans):
         texts.extend(_entry(t, dim.key) for t in scan.texts)
     return _merge(scans, dim.key)
+
+
+def _strongholds(files: WorldFiles, errors: list[str]) -> tuple[tuple[int, int], ...]:
+    """Start chunks from the old-format structure file (`[x,z]` keys), when there is one.
+
+    Java 1.12 wrote `data/Stronghold.dat`, the Wii U `data/StrongHold.dat`; the Wii U's
+    per-structure data is its own binary format, so only the keys are used.
+    """
+    starts: list[tuple[int, int]] = []
+    for f in files.listing.files:
+        if f.relpath.lower() != STRONGHOLD_FILE:
+            continue
+        try:
+            root = nbt.decode_file(files.read_bytes(f.relpath))
+        except (OSError, nbt.NbtError, EOFError) as e:
+            errors.append(f"{f.relpath}: {e}")
+            continue
+        features = compound(compound(root, "data") or {}, "Features") or {}
+        starts.extend((int(m[1]), int(m[2])) for key in features if (m := _CHUNK_KEY.match(key)))
+    return tuple(starts)
 
 
 def _player_texts(files: WorldFiles, layout: WorldLayout, errors: list[str]) -> list[TextEntry]:
@@ -155,6 +196,10 @@ def _player_texts(files: WorldFiles, layout: WorldLayout, errors: list[str]) -> 
 def analyze_blocks(files: WorldFiles, layout: WorldLayout, mapper: Mapper) -> BlockFacts:
     errors: list[str] = []
     texts: list[TextEntry] = []
-    dims = [_dimension(files, d, mapper, errors, texts) for d in layout.dimensions]
+    strongholds = _strongholds(files, errors)
+    dims = [
+        _dimension(files, d, mapper, errors, texts, strongholds=strongholds)
+        for d in layout.dimensions
+    ]
     texts.extend(_player_texts(files, layout, errors))
     return BlockFacts(dimensions=dims, texts=texts, errors=errors)
