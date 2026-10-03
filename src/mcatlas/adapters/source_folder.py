@@ -14,7 +14,7 @@ from typing import Final
 
 from mcatlas.adapters import readonly
 from mcatlas.adapters.source_zip import ZipArchive, split_zip_relpath
-from mcatlas.core.discovery import is_world_root
+from mcatlas.core.discovery import is_world_root, merge_sibling_roots
 from mcatlas.core.model import SourceFile, WorldFiles, WorldListing
 
 _IGNORED_NAMES: Final = frozenset({".DS_Store", "Thumbs.db", "desktop.ini", ".localized"})
@@ -119,7 +119,7 @@ class FolderSource:
         roots: list[str] = []
         for d in dirs:
             roots += self._find_roots(f"{rel_dir}/{d}", depth + 1)
-        return roots
+        return merge_sibling_roots(rel_dir, roots)
 
     def _scan_top(self, name: str) -> list[WorldListing]:
         roots = self._find_roots(name, 0) or [name]  # no world inside: still list the folder

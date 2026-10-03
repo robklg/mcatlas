@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from mcatlas.core.catalog import WorldEntry
 from mcatlas.core.discovery import classify
 from mcatlas.core.model import Generator, Language, WorldFormat
-from mcatlas.core.render import MIN_DATA_VERSION, MapPlan, plan_maps, without_texts
+from mcatlas.core.render import MIN_DATA_VERSION, MapPlan, plan_maps, staged_path, without_texts
 from mcatlas.ports import Renderer, WorldSource
 
 type Progress = Callable[[str], None]
@@ -101,23 +101,26 @@ def render_worlds(
             if not world_plans:
                 report.skipped.append((entry.name, _why_not(entry)))
                 continue
-            needed = {world_plans[0].level_file} | {f for p in world_plans for f in p.region_files}
+            sources_needed = {world_plans[0].level_file} | {
+                f for p in world_plans for f in p.region_files
+            }
+            needed = {staged_path(layout, rel): rel for rel in sources_needed}
             have = renderer.staged(entry.world_id)
             files = {f.relpath: f for f in listing.files}
             todo = [
-                rel
-                for rel in sorted(needed)
-                if have.get(rel) != (files[rel].size, files[rel].mtime_ns)
+                (staged, rel)
+                for staged, rel in sorted(needed.items())
+                if have.get(staged) != (files[rel].size, files[rel].mtime_ns)
             ]
             if todo:
                 say(f"copying {len(todo)} file(s) of {entry.name}")
                 with source.open(listing) as world:
-                    for rel in todo:
+                    for staged, rel in todo:
                         data = world.read_bytes(rel)
-                        renderer.stage(entry.world_id, rel, data, files[rel].mtime_ns)
+                        renderer.stage(entry.world_id, staged, data, files[rel].mtime_ns)
                         report.copied_files += 1
                         report.copied_bytes += len(data)
-            report.removed_files += renderer.unstage(entry.world_id, needed)
+            report.removed_files += renderer.unstage(entry.world_id, needed.keys())
             for plan in world_plans:
                 plans[plan.map_id] = plan
                 before = previous.get(plan.map_id)

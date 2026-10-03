@@ -40,6 +40,7 @@ class AnalyzeReport:
 @dataclass(frozen=True, slots=True)
 class _Outcome:
     listing: WorldListing
+    layout: WorldLayout
     results: list[tuple[analyze.Analyzer[Facts], str | None, str | None]]
     icon: bytes | None
     images: dict[str, dict[str, bytes]]
@@ -89,7 +90,7 @@ def _run(
                 icon = files.read_bytes(layout.icon)
             except OSError:
                 icon = None
-    return _Outcome(listing, results, icon, images)
+    return _Outcome(listing, layout, results, icon, images)
 
 
 def analyze_sources(
@@ -124,7 +125,9 @@ def analyze_sources(
                 a
                 for a in analyzers
                 if options.force
-                or not store.is_current(listing.world_id, a.name, a.version, fingerprint)
+                or not store.is_current(
+                    listing.world_id, a.name, a.version, analyze.cache_key(a, layout, fingerprint)
+                )
             ]
             want_icon = layout.icon is not None and (
                 options.force or not store.has_asset(listing.world_id, ICON, fingerprint)
@@ -149,7 +152,7 @@ def analyze_sources(
                         listing.world_id,
                         analyzer.name,
                         analyzer.version,
-                        fingerprint,
+                        analyze.cache_key(analyzer, outcome.layout, fingerprint),
                         payload=payload,
                         error=error,
                     )

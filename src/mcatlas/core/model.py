@@ -30,7 +30,7 @@ class WorldFormat(StrEnum):
     NO_TERRAIN = "no_terrain"
     """Has a level.dat but no region files (e.g. a console-edition export or an empty world)."""
     NO_LEVEL_DAT = "no_level_dat"
-    """Has region files but no level.dat."""
+    """Has region files but neither a level.dat nor the 26.1+ files that replace it."""
     EMPTY = "empty"
     """A folder without any recognizable world data."""
 
@@ -133,6 +133,8 @@ class WorldLayout:
     format: WorldFormat
     level_dat: str | None
     """Relative path of the level file that was found (level.dat, special_level.dat, ...)."""
+    level_data: tuple[str, ...]
+    """The 26.1+ files that hold what level.dat used to (seed, spawn, game mode), if any."""
     dimensions: tuple[DimensionLayout, ...]
     player_data: tuple[SourceFile, ...]
     stats: tuple[SourceFile, ...]

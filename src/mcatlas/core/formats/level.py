@@ -1,6 +1,9 @@
-"""level.dat / special_level.dat across versions (Beta McRegion up to 1.21)."""
+"""level.dat / special_level.dat across versions (Beta McRegion up to 1.21), and the 26.1+
+files that took over part of it (`data/minecraft/world_gen_settings.dat`, Paper's
+`data/paper/level_overrides.dat`)."""
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from mcatlas.core.facts import LevelFacts
@@ -122,3 +125,43 @@ def parse_level(root: NbtCompound, level_file: str) -> LevelFacts:
         enabled_features=strings(list_(data, "enabled_features")),
         host_player=parse_player_state(host) if host else None,
     )
+
+
+def _level_data_version(parts: Mapping[str, NbtCompound]) -> int | None:
+    versions = [v for part in parts.values() if (v := int_(part, "DataVersion")) is not None]
+    return max(versions, default=None)
+
+
+def apply_level_data(
+    base: LevelFacts | None, parts: Mapping[str, NbtCompound], level_file: str
+) -> LevelFacts:
+    """Complete (or, without a level.dat, build) the level facts from the 26.1+ files.
+
+    `parts` maps each file's path to its decoded root. They hold the world's current state, so
+    they win over a level.dat that is older: e.g. a single-player level.dat kept from before
+    the world moved to a server. Name, last played and host player stay the level.dat's.
+    """
+    facts = base or LevelFacts(level_file=level_file)
+    data_version = _level_data_version(parts)
+    if base is not None and data_version is not None and (base.data_version or 0) > data_version:
+        return base
+    update: dict[str, object] = {}
+    if data_version is not None and data_version != facts.data_version:
+        # A level.dat's version name belongs to its own, older DataVersion.
+        facts = facts.model_copy(update={"data_version": data_version, "version_name": None})
+    for path, root in parts.items():
+        data = compound(root, "data") or {}
+        if path.endswith("world_gen_settings.dat"):
+            generator, detail = detect_generator({"WorldGenSettings": data})
+            if generator is not Generator.UNKNOWN:
+                update |= {"generator": generator, "generator_detail": detail}
+            update["seed"] = int_(data, "seed")
+        elif path.endswith("level_overrides.dat"):
+            difficulty = compound(data, "difficulty_settings") or {}
+            update |= {
+                "game_mode": game_mode(int_(data, "game_type")),
+                "hardcore": bool_(difficulty, "hardcore"),
+                "time_ticks": int_(data, "game_time"),
+                "spawn": _spawn(data),
+            }
+    return facts.model_copy(update={k: v for k, v in update.items() if v is not None})

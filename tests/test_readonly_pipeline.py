@@ -13,12 +13,14 @@ import pytest
 from builders import (
     FAKE_BLUEMAP,
     Byte,
+    Long,
     PlayerSpec,
     TypedList,
     chunk_nbt,
     fake_java,
     make_world,
     map_dat,
+    nbt_gz,
     region,
 )
 
@@ -74,6 +76,63 @@ def _entities_region() -> bytes:
         "Entities": TypedList(10, [wolf]),
     }
     return region({(5, 0): (root, 1_693_591_200)})
+
+
+def _level_data(folder: str, seed: int) -> dict[str, bytes]:
+    """The 26.1+ files a Paper server keeps instead of a level.dat for a Multiverse world."""
+    gen = {"generator": {"type": "minecraft:noise", "settings": "minecraft:overworld"}}
+    return {
+        f"{folder}/data/minecraft/world_gen_settings.dat": nbt_gz(
+            {
+                "DataVersion": 4903,
+                "data": {
+                    "seed": Long(seed),
+                    "dimensions": {"minecraft:overworld": {"generator": gen}},
+                },
+            }
+        ),
+        f"{folder}/data/paper/level_overrides.dat": nbt_gz(
+            {
+                "DataVersion": 4903,
+                "data": {
+                    "game_type": 0,
+                    "game_time": Long(9_000_000),
+                    "spawn": {"pos": np.array([0, 58, 0], dtype=np.int32)},
+                },
+            }
+        ),
+        f"{folder}/data/minecraft/weather.dat": nbt_gz({"DataVersion": 4903, "data": {}}),
+        f"{folder}/paper-world.yml": b"_version: 31\n",
+    }
+
+
+def _build_server_worlds(root: Path) -> None:
+    # Downloaded from a Paper server, with the old single-player level.dat put next to it.
+    make_world(
+        root / "server export",
+        level_name="Kasteel",
+        data_version=4189,
+        version_name="1.21.4",
+        chunks={
+            "castle/region": _chunks(2, T0 + 120 * DAY),
+            "castle_the_end/region": _chunks(1, T0 + 121 * DAY),
+        },
+        chunk_data={"castle_nether/region": [_house_chunk()]},
+        extra_files={
+            **_level_data("castle", seed=-77),
+            "castle_nether/data/paper/level_overrides.dat": nbt_gz({"DataVersion": 4903}),
+        },
+    )
+    # The same, without any level.dat: only the folders say it is one world.
+    tower = make_world(
+        root / "tower_export",
+        chunks={
+            "tower/region": _chunks(3, T0 + 130 * DAY),
+            "tower_nether/region": _chunks(1, T0 + 130 * DAY),
+        },
+        extra_files=_level_data("tower", seed=12),
+    )
+    (tower / "level.dat").unlink()
 
 
 def _build_archive(root: Path) -> None:
@@ -147,6 +206,7 @@ def _build_archive(root: Path) -> None:
             if p.is_file():
                 zf.write(p, p.relative_to(zip_src).as_posix())
     (root / "DOORS.zip").write_bytes(buf.getvalue())
+    _build_server_worlds(root)
     assert dream.exists()
 
 
@@ -217,8 +277,8 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert before.entries == after.entries
 
     # Rendering copied only what the maps need, and BlueMap saw only those copies.
-    # Five worlds get a map; the empty folder, console and 20w14∞ worlds cannot.
-    assert rendered.rendered == rendered.maps == 5 and len(rendered.skipped) == 3
+    # Six worlds get a map; the empty folder, console, 20w14∞ and level.dat-less worlds cannot.
+    assert rendered.rendered == rendered.maps == 6 and len(rendered.skipped) == 4
     assert again.rendered == 0 and again.copied_files == 0 and again.up_to_date == again.maps
     assert dutch.rendered == 0 and dutch.up_to_date == dutch.maps  # markers only
     seen = (out / "render" / "fake-bluemap.log").read_text().splitlines()
@@ -241,6 +301,8 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         "console",
         "infinite dimensions",
         "DOORS",
+        "server export",
+        "tower_export",
     }
 
     dream = by_folder["Alex en Sam's droom wereld"]
@@ -296,8 +358,32 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert catalog.renders[doors.world_id][0].areas[0].label == "Spawn"  # copied from the zip
     assert by_folder["Demo_World"].world_id not in catalog.renders
 
+    # Server worlds: sibling folders are one world, its state read from the 26.1+ files.
+    castle = by_folder["server export"]
+    assert castle.format is WorldFormat.ANVIL and castle.name == "Kasteel"
+    assert [d.key for d in castle.dimensions] == [
+        "minecraft:overworld",
+        "minecraft:the_nether",
+        "minecraft:the_end",
+    ]
+    assert (castle.seed, castle.spawn, castle.data_version) == (-77, (0, 58, 0), 4903)
+    assert castle.version_name is None  # the level.dat's "1.21.4" is older than the world
+    assert castle.build is not None and castle.build.sites[0].dimension == "minecraft:the_nether"
+    [castle_map] = catalog.renders[castle.world_id]
+    assert castle_map.region_files == ["castle_nether/region/r.0.0.mca"]
+    staged = out / "render" / "worlds" / castle.world_id
+    assert sorted(p.relative_to(staged).as_posix() for p in staged.rglob("*") if p.is_file()) == [
+        "DIM-1/region/r.0.0.mca",  # where BlueMap looks for the nether
+        "level.dat",
+    ]
+    tower = by_folder["tower_export"]
+    assert tower.relpath == "tower_export" and tower.format is WorldFormat.ANVIL
+    assert (tower.seed, tower.chunks, len(tower.dimensions)) == (12, 4, 2)
+    assert tower.build is not None  # tier 2 ran, although there is no level.dat
+    assert tower.world_id not in catalog.renders
+
     # The durable atlas: plain files per world, the flat map and icon included.
-    assert exported.worlds == 8 and not exported.problems
+    assert exported.worlds == 10 and not exported.problems
     world_dir = out / "atlas" / "worlds" / dream.world_id
     facts = tomllib.loads((world_dir / "facts.toml").read_text())
     assert facts["schema_version"] == 1 and facts["build"]["built"] == 130

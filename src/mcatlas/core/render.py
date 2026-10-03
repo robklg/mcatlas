@@ -93,6 +93,33 @@ class RenderedMap(MapPlan):
     show an earlier render. Tiles whose new version was identical are not counted."""
 
 
+_VANILLA_REGION_DIRS: Final[dict[str, str]] = {
+    OVERWORLD: "region",
+    NETHER: "DIM-1/region",
+    THE_END: "DIM1/region",
+}
+
+
+def staged_path(layout: WorldLayout, relpath: str) -> str:
+    """Where the renderer's copy of a world file goes.
+
+    BlueMap reads the vanilla layout, so the region files of a server world whose nether and
+    end are sibling folders (`<name>_nether/region/`) move to `DIM-1/region/` and so on, and
+    its level file to the top.
+    """
+    if relpath == layout.level_dat:
+        return relpath.rsplit("/", 1)[-1]
+    for dim in layout.dimensions:
+        vanilla = _VANILLA_REGION_DIRS.get(dim.key)
+        if (
+            vanilla is not None
+            and not dim.region_dir.startswith("dimensions/")
+            and relpath.startswith(f"{dim.region_dir}/")
+        ):
+            return vanilla + relpath.removeprefix(dim.region_dir)
+    return relpath
+
+
 def map_id(world_id: WorldId, dimension: str) -> str:
     """BlueMap map ids may only hold letters, digits and underscores (it rewrites the rest)."""
     suffix = DIMENSIONS.get(dimension)

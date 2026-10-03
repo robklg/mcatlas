@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from mcatlas.adapters import readonly
-from mcatlas.core.discovery import is_world_root
+from mcatlas.core.discovery import is_world_root, merge_all_sibling_roots
 from mcatlas.core.model import SourceFile, WorldFiles, WorldListing
 
 ZIP_SEPARATOR = "!/"
@@ -85,8 +85,7 @@ class ZipArchive:
             if not nested and is_world_root(files_in.get(d, []), dirs_in.get(d, set())):
                 roots.append(d)
 
-        if not roots:
-            roots = [""]
+        roots = merge_all_sibling_roots(roots) or [""]
         listings: list[WorldListing] = []
         for root in roots:
             prefix = f"{root}/" if root else ""

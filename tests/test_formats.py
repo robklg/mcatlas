@@ -5,10 +5,16 @@ import numpy as np
 from builders import Long, TypedList, uuid_ints
 
 from mcatlas.core.formats.advancements import parse_advancements
-from mcatlas.core.formats.level import detect_generator, parse_level, strip_formatting
+from mcatlas.core.formats.level import (
+    apply_level_data,
+    detect_generator,
+    parse_level,
+    strip_formatting,
+)
 from mcatlas.core.formats.player import parse_player_state
 from mcatlas.core.formats.stats import parse_stats
 from mcatlas.core.model import GameMode, Generator
+from mcatlas.core.nbt import NbtCompound
 
 
 def _gen(generator: dict) -> dict:
@@ -102,6 +108,75 @@ def test_parse_level_fields():
     assert level.host_player is not None
     assert level.host_player.uuid == "a1e0a1e0-0000-4000-8000-000000000001"
     assert level.host_player.dimension == "minecraft:overworld"
+
+
+_WORLD_GEN: NbtCompound = {
+    "DataVersion": 4903,
+    "data": {
+        "seed": -77,
+        "dimensions": {
+            "minecraft:overworld": {
+                "generator": {"type": "minecraft:noise", "settings": "minecraft:amplified"}
+            }
+        },
+    },
+}
+_OVERRIDES: NbtCompound = {
+    "DataVersion": 4903,
+    "data": {
+        "game_type": 1,
+        "game_time": 5_000,
+        "difficulty_settings": {"hardcore": 0, "difficulty": "normal"},
+        "spawn": {"pos": np.array([10, 70, -20], dtype=">i4")},
+    },
+}
+_PARTS: dict[str, NbtCompound] = {
+    "castle/data/minecraft/world_gen_settings.dat": _WORLD_GEN,
+    "castle/data/paper/level_overrides.dat": _OVERRIDES,
+}
+
+
+def test_level_data_without_level_dat():
+    facts = apply_level_data(None, _PARTS, "castle/data/minecraft/world_gen_settings.dat")
+    assert facts.level_file == "castle/data/minecraft/world_gen_settings.dat"
+    assert (facts.seed, facts.generator, facts.spawn) == (-77, Generator.AMPLIFIED, (10, 70, -20))
+    assert (facts.game_mode, facts.hardcore, facts.time_ticks) == (GameMode.CREATIVE, False, 5_000)
+    assert (facts.data_version, facts.version_name, facts.level_name) == (4903, None, None)
+
+
+def test_level_data_over_an_older_level_dat():
+    """A single-player level.dat kept from before the world moved to a server."""
+    old = parse_level(
+        {
+            "Data": {
+                "LevelName": "Kasteel",
+                "DataVersion": 4189,
+                "Version": {"Name": "1.21.4"},
+                "LastPlayed": 1_700_000_000_000,
+                "GameType": 0,
+                "SpawnX": 1,
+                "SpawnY": 64,
+                "SpawnZ": 2,
+                "WorldGenSettings": {"seed": -77},
+            }
+        },
+        "level.dat",
+    )
+    facts = apply_level_data(old, _PARTS, "castle/data/minecraft/world_gen_settings.dat")
+    assert (facts.level_file, facts.level_name, facts.last_played) == (
+        "level.dat",
+        "Kasteel",
+        old.last_played,
+    )
+    assert (facts.data_version, facts.version_name) == (4903, None)
+    assert (facts.spawn, facts.game_mode, facts.generator) == (
+        (10, 70, -20),
+        GameMode.CREATIVE,
+        Generator.AMPLIFIED,
+    )
+    # A level.dat newer than the data files keeps its own word.
+    newer = old.model_copy(update={"data_version": 5000})
+    assert apply_level_data(newer, _PARTS, "x") == newer
 
 
 def test_strip_formatting():

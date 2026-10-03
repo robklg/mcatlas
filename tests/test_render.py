@@ -82,6 +82,7 @@ def _dim(key: str, region_dir: str, coords: list[tuple[int, int]]) -> DimensionL
 LAYOUT = WorldLayout(
     format=WorldFormat.ANVIL,
     level_dat="level.dat",
+    level_data=(),
     dimensions=(
         _dim(OVERWORLD, "region", [(0, 0), (-1, 0), (0, -1), (-1, -1), (5, 5)]),
         _dim(NETHER, "DIM-1/region", [(0, 0)]),

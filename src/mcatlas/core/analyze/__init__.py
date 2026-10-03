@@ -25,7 +25,7 @@ from mcatlas.core.facts import (
     PlayersFacts,
     RegionFacts,
 )
-from mcatlas.core.model import Mapper, WorldFiles, WorldFormat, WorldLayout
+from mcatlas.core.model import Mapper, WorldFiles, WorldLayout
 
 T_co = TypeVar("T_co", bound=Facts, covariant=True)
 
@@ -50,14 +50,24 @@ def _simple[T: Facts](
     return lambda files, layout, _mapper: fn(files, layout)
 
 
+def _has_anvil_regions(layout: WorldLayout) -> bool:
+    """Chunks to read, whether or not a level.dat came along."""
+    return any(f.relpath.endswith(".mca") for d in layout.dimensions for f in d.region_files)
+
+
 LEVEL = Analyzer(
-    "level", 1, 1, LevelFacts, _simple(analyze_level), lambda lay: lay.level_dat is not None
+    "level",
+    1,
+    1,
+    LevelFacts,
+    _simple(analyze_level),
+    lambda lay: lay.level_dat is not None or bool(lay.level_data),
 )
 PLAYERS = Analyzer("players", 1, 1, PlayersFacts, _simple(analyze_players))
 REGIONS = Analyzer(
     "regions", 2, 1, RegionFacts, _simple(analyze_regions), lambda lay: bool(lay.dimensions)
 )
-FILES = Analyzer("files", 1, 1, FileFacts, _simple(analyze_files))
+FILES = Analyzer("files", 2, 1, FileFacts, _simple(analyze_files))
 MAPS = Analyzer("maps", 2, 1, MapFacts, _simple(analyze_maps))
 """In-game maps; their images are stored as assets named `maps/<image>`."""
 BLOCKS = Analyzer(
@@ -66,12 +76,18 @@ BLOCKS = Analyzer(
     2,
     BlockFacts,
     analyze_blocks,
-    lambda lay: lay.format is WorldFormat.ANVIL and bool(lay.dimensions),
+    _has_anvil_regions,
 )
 """Version combines the block lists' version with the analyzer's own."""
 
 ALL: tuple[Analyzer[Facts], ...] = (LEVEL, PLAYERS, REGIONS, FILES, MAPS, BLOCKS)
 BY_NAME: dict[str, Analyzer[Facts]] = {a.name: a for a in ALL}
+
+
+def cache_key(analyzer: Analyzer[Facts], layout: WorldLayout, fingerprint: str) -> str:
+    """The fingerprint to cache a result under. "Not applicable" gets its own key, so a world
+    is analyzed as soon as a newer mcatlas finds that the analyzer does apply to it."""
+    return fingerprint if analyzer.applies(layout) else f"{fingerprint}/n-a"
 
 
 def for_tier(tier: int) -> list[Analyzer[Facts]]:

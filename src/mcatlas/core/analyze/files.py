@@ -1,7 +1,9 @@
 """File-level facts from the listing alone: size, icon, in-game maps and save times.
 
 Only game files count towards save times; Finder litter such as .DS_Store would otherwise
-show up as "activity".
+show up as "activity". So do the 26.1+ world-state files in `data/minecraft/` and `data/paper/`
+(weather, raids, clocks, ...): a server rewrites them on every autosave, even with nobody
+online, while chunks are only saved where someone played.
 """
 
 import re
@@ -13,10 +15,13 @@ from mcatlas.core.model import SourceFile, WorldFiles, WorldLayout
 
 _MAP_ITEM = re.compile(r"(^|/)data/map_\d+\.dat$")
 _PLAYER_DIRS = ("playerdata/", "stats/", "advancements/", "players/")
+_WORLD_STATE = re.compile(r"(^|/)data/(minecraft|paper)/[^/]+\.dat$")
 
 
 def is_game_file(f: SourceFile) -> bool:
     name = f.relpath.rsplit("/", 1)[-1]
+    if _WORLD_STATE.search(f.relpath):
+        return False
     if name.startswith(("level.dat", "special_level.dat")):
         return True
     if parse_region_name(name):
