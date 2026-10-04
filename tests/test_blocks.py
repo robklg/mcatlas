@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from builders import Byte, chunk_nbt, nbt, pack, region
+from builders import Byte, TypedList, chunk_nbt, nbt, pack, region
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -27,14 +27,31 @@ def test_unpack_rejects_short_data():
         unpack(np.zeros(3, dtype=np.int64), 5, spanning=False)
 
 
-def test_palette_entries_saved_by_26_3():
-    """26.3 writes palette entries as {id, properties} instead of {Name, Properties}."""
+@pytest.mark.parametrize("form", ["id", "strings", "mixed"])
+def test_palette_entries_saved_by_26_3(form):
+    """26.3 writes {id, properties}, a plain string for a block without properties, and
+    {"": name} for those in a list that also holds {id, properties}."""
     raw = chunk_nbt(0, 0, {(1, 70, 2): "minecraft:glass"}, fill=GROUND)
     for section in raw["sections"].items:
-        for entry in section["block_states"]["palette"].items:
-            entry["id"] = entry.pop("Name")
+        palette = section["block_states"]["palette"]
+        names = [entry["Name"] for entry in palette.items]
+        match form:
+            case "id":
+                entries = TypedList(10, [{"id": n} for n in names])
+            case "strings":
+                entries = TypedList(8, names)
+            case _:
+                entries = TypedList(
+                    10,
+                    [
+                        {"id": n, "properties": {"snowy": "false"}} if n == GRASS else {"": n}
+                        for n in names
+                    ],
+                )
+        section["block_states"]["palette"] = entries
     names = {n for sec in parse_chunk(decode(nbt(raw))).sections for n in sec.palette}
     assert {"minecraft:glass", STONE, GRASS} <= names
+    assert "minecraft:air" in names
 
 
 @pytest.mark.parametrize(

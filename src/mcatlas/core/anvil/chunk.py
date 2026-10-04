@@ -109,13 +109,20 @@ def unpack(
     return values.astype(np.uint16)
 
 
+def _block_name(entry: nbt.NbtValue) -> str:
+    """A palette entry's block: {Name, Properties}, or since 26.3 {id, properties}, a plain
+    string for a block without properties, and {"": name} where a list mixes the two."""
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        return str_(entry, "Name") or str_(entry, "id") or str_(entry, "") or "minecraft:air"
+    return "minecraft:air"  # keeps the indices of the other entries right
+
+
 def _section(
-    y: int, palette_nbt: list[nbt.NbtCompound], data: nbt.NbtValue | None, *, spanning: bool
+    y: int, palette_nbt: nbt.NbtList | None, data: nbt.NbtValue | None, *, spanning: bool
 ) -> Section | None:
-    # Block states are {Name, Properties}; chunks saved by 26.3 write {id, properties}.
-    palette = tuple(
-        str_(entry, "Name") or str_(entry, "id") or "minecraft:air" for entry in palette_nbt
-    )
+    palette = tuple(_block_name(entry) for entry in palette_nbt or [])
     if not palette:
         return None
     if len(palette) == 1:
@@ -161,13 +168,9 @@ def parse_chunk(root: nbt.NbtCompound) -> Chunk:
             states = compound(sec, "block_states")
             if states is None:
                 continue
-            parsed = _section(
-                y, compounds(list_(states, "palette")), states.get("data"), spanning=False
-            )
+            parsed = _section(y, list_(states, "palette"), states.get("data"), spanning=False)
         else:
-            parsed = _section(
-                y, compounds(list_(sec, "Palette")), sec.get("BlockStates"), spanning=spanning
-            )
+            parsed = _section(y, list_(sec, "Palette"), sec.get("BlockStates"), spanning=spanning)
         if parsed is not None:
             sections.append(parsed)
 
