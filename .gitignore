@@ -17,3 +17,6 @@ mcatlas.toml
 
 # Private notes for Claude Code (real names, paths): never commit
 CLAUDE.local.md
+
+# Private plans and notes for coordinating with other projects: never commit
+/.claude/local/
