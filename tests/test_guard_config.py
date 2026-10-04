@@ -107,6 +107,27 @@ timezone = "Europe/Amsterdam"
     assert settings.analysis.zone().key == "Europe/Amsterdam"
 
 
+def test_serving_needs_no_archive(tmp_path):
+    """A web server holds the site, the fact store and the notes, not the worlds themselves."""
+    cfg = _write_config(
+        tmp_path,
+        f"""
+[[sources]]
+id = "archive"
+path = "{tmp_path / "not-on-this-machine"}"
+[paths]
+state_dir = "{tmp_path / "state"}"
+site_dir = "{tmp_path / "site"}"
+[serve]
+allowed_hosts = [" Atlas.Example.org ", ""]
+""",
+    )
+    settings, _ = load_settings(cfg)
+    assert not settings.sources[0].path.exists()
+    assert settings.serve.allowed_hosts == ["atlas.example.org"]
+    guard.protect(s.path for s in settings.sources)  # as the CLI does; must not need the folder
+
+
 def test_env_overrides_file(tmp_path, monkeypatch):
     cfg = _write_config(
         tmp_path,

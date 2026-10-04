@@ -189,6 +189,21 @@ Gevonden via de bordjes op de perrons.
 The `world` field ties a file to its world, so files can be renamed. Notes are searchable and
 filterable on the site and survive without mcatlas.
 
+### Behind a reverse proxy
+
+`mcatlas serve` can also run on a server, behind a reverse proxy that adds TLS and a login. It
+needs the site, the fact store (`paths.state_dir`), the 3D maps and the annotations folder, but
+not the worlds themselves. The note editor only accepts requests whose Host header names the
+server (against DNS rebinding), so tell it the name the proxy serves the site under, exactly as
+the browser sends it:
+
+```sh
+uv run mcatlas serve --host 0.0.0.0 --allow-host atlas.example.org
+```
+
+or `allowed_hosts = ["atlas.example.org"]` under `[serve]` in the config. Keep the login on the
+proxy: anyone who reaches the server can read the site and write notes.
+
 After adding or editing notes, run `mcatlas export-atlas` again so the atlas pages quote them
 too (the notes themselves are already durable where they are).
 

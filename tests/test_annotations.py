@@ -182,3 +182,32 @@ def test_serve_note_api_requires_header_and_host(tmp_path: Path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_serve_behind_a_reverse_proxy(tmp_path: Path):
+    """The proxy passes the browser's Host header: the site's own name, without a port."""
+    server = serve(
+        tmp_path,
+        "127.0.0.1",
+        0,
+        on_note=lambda _w, _p: {"ok": True},
+        allowed_hosts=["Atlas.Example.org"],
+    )
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        path = f"/api/notes/{WORLD}"
+
+        def status(host: str, api: bool = True) -> int:
+            headers = {"Host": host} | ({"X-Mcatlas": "1"} if api else {})
+            return _post(port, path, {"note": "x"}, headers)[0]
+
+        assert status("atlas.example.org") == 200
+        assert status(f"127.0.0.1:{port}") == 200  # its own address still works
+        assert status("atlas.example.org:443") == 403  # compared exactly as sent
+        assert status("evil.example") == 403
+        assert status("atlas.example.org", api=False) == 403  # the custom header stays required
+    finally:
+        server.shutdown()
+        server.server_close()

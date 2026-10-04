@@ -44,6 +44,11 @@ timezone = "Europe/Amsterdam"   # turns timestamps into calendar days
 jobs = 8                        # worlds analyzed in parallel
 # processes = 8                 # tier 2 chunk decoding; default: all CPU cores
 
+[serve]
+# `mcatlas serve` only accepts notes for its own address. Behind a reverse proxy, list the
+# Host header the browser sends (exactly, so with a port only if the URL has one).
+# allowed_hosts = ["atlas.example.org"]
+
 [render]
 # BlueMap CLI (https://github.com/BlueMap-Minecraft/BlueMap/releases) and Java 25 to run it.
 # java = "~/Library/Application Support/minecraft/runtime/java-runtime-epsilon/mac-os-arm64/java-runtime-epsilon/jre.bundle/Contents/Home/bin/java"

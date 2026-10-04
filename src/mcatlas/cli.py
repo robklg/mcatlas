@@ -467,6 +467,14 @@ def serve(
     host: Annotated[
         str, typer.Option(help="Bind address; keep 127.0.0.1 unless you mean it")
     ] = "127.0.0.1",
+    allow_host: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--allow-host",
+            help="Also accept notes for this Host header, e.g. the name a reverse proxy "
+            "serves the site under (repeatable; adds to [serve] allowed_hosts)",
+        ),
+    ] = None,
 ) -> None:
     """Serve the generated site on http://HOST:PORT; notes can be edited on the site."""
     settings = _settings()
@@ -498,6 +506,7 @@ def serve(
         port,
         on_note=on_note if can_write else None,
         extra=extra,
+        allowed_hosts=[*settings.serve.allowed_hosts, *(allow_host or [])],
     )
     console.print(f"Serving {settings.paths.site_dir} on http://{host}:{port}  (Ctrl-C to stop)")
     if web_3d is not None:
@@ -506,6 +515,9 @@ def serve(
         console.print(f"Atlas on http://{host}:{port}/atlas/ from {atlas_dir}")
     if can_write:
         console.print(f"Notes are saved in {settings.paths.annotations()}")
+        names = sorted(h for h in server.allowed_hosts if not h.endswith(f":{port}"))
+        if names:
+            console.print(f"Notes are also accepted via: {', '.join(names)}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

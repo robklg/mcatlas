@@ -1,8 +1,11 @@
 """Layer boundaries (see .importlinter) and the no-writer rule, as part of the test suite."""
 
 import ast
+import re
 import subprocess
 import sys
+import tomllib
+from importlib.metadata import packages_distributions
 from pathlib import Path
 
 import pytest
@@ -56,3 +59,33 @@ def test_source_adapters_only_open_read_only(name):
             assert _mode(call, 1) == "r", f"{name}: {ast.unparse(call)}"
         elif func == "open" or func.endswith((".write_bytes", ".write_text", ".touch", ".mkdir")):
             pytest.fail(f"{name}: unexpected file operation {ast.unparse(call)}")
+
+
+def _requirement_name(spec: str) -> str:
+    return re.split(r"[<>=!~;\[ ]", spec, maxsplit=1)[0].strip().lower().replace("_", "-")
+
+
+def test_every_imported_package_is_a_runtime_dependency():
+    """An install without the dev dependencies (a server, a container) must still start: a
+    package that only arrives through a dev tool would crash it at import time."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    declared = {_requirement_name(spec) for spec in project["dependencies"]}
+    distributions = packages_distributions()
+    stdlib = sys.stdlib_module_names
+    missing: set[str] = set()
+    for path in SRC.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules = [node.module]
+            else:
+                continue
+            for module in modules:
+                top = module.split(".", 1)[0]
+                if top in stdlib or top == "mcatlas":
+                    continue
+                dists = {d.lower().replace("_", "-") for d in distributions.get(top, [top])}
+                if not dists & declared:
+                    missing.add(f"{top} ({path.relative_to(ROOT)})")
+    assert not missing, f"imported but not in [project] dependencies: {sorted(missing)}"

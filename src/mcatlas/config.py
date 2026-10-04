@@ -125,6 +125,18 @@ class AnalysisSettings(BaseModel):
         return ZoneInfo(self.timezone)
 
 
+class ServeSettings(BaseModel):
+    allowed_hosts: list[str] = Field(default_factory=list[str])
+    """Host headers the note editor accepts besides the address `serve` binds to: the name a
+    reverse proxy serves the site under (e.g. "atlas.example.org"). Compared exactly as the
+    browser sends it, so with a port only when the URL has one."""
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _lower(cls, v: list[str]) -> list[str]:
+        return [h.strip().lower() for h in v if h.strip()]
+
+
 class RenderSettings(BaseModel):
     """3D maps with BlueMap (https://bluemap.bluecolored.de), run as a separate Java program.
 
@@ -182,6 +194,7 @@ class Settings(BaseSettings):
     players: PlayerSettings = Field(default_factory=PlayerSettings)
     analysis: AnalysisSettings = Field(default_factory=AnalysisSettings)
     render: RenderSettings = Field(default_factory=RenderSettings)
+    serve: ServeSettings = Field(default_factory=ServeSettings)
 
     @model_validator(mode="after")
     def _no_overlap(self) -> Self:

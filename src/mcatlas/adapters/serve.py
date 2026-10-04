@@ -4,11 +4,12 @@ Besides static files it offers one write endpoint, `POST /api/notes/<world id>`,
 site to save a note. It only changes annotation files (never worlds), and it refuses requests
 that a web page from another site could send: a custom header is required (which browsers only
 send cross-site after a CORS preflight that this server never approves) and the Host header must
-name this server (against DNS rebinding).
+name this server (against DNS rebinding): the address it binds to, or a name it is told about,
+such as the one a reverse proxy serves the site under.
 """
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -120,11 +121,14 @@ def serve(
     *,
     on_note: NoteHandler | None = None,
     extra: Mapping[str, Path] | None = None,
+    allowed_hosts: Iterable[str] = (),
 ) -> SiteServer:
+    """`allowed_hosts`: more Host headers to accept for notes, compared exactly as sent."""
     handler = partial(_Handler, directory=str(directory))
     server = SiteServer((host, port), handler)
     server.on_note = on_note
     server.extra = dict(extra or {})
     names = {host, "localhost", "127.0.0.1"} if host in {"127.0.0.1", "localhost"} else {host}
-    server.allowed_hosts = frozenset(f"{n}:{server.server_address[1]}" for n in names)
+    own = {f"{n}:{server.server_address[1]}" for n in names}
+    server.allowed_hosts = frozenset(own | {h.lower() for h in allowed_hosts})
     return server
