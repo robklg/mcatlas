@@ -129,6 +129,13 @@ def test_corrected_dates():
     assert (facts.play_days, facts.undated_play_days) == ({date(2020, 12, 30): 42}, 2)
 
 
+def test_finalized_by_minecraft():
+    raw = json.loads(_metadata())
+    assert not parse_console(json.dumps(raw).encode(), "m").finalized
+    raw["conversion"]["finalized"] = {"by": "official Minecraft server", "chunks_loaded": 9}
+    assert parse_console(json.dumps(raw).encode(), "m").finalized
+
+
 def test_chunk_times():
     columns = [
         "dimension",

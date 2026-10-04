@@ -94,8 +94,9 @@ def _context_category(name: str, structures: tuple[str, ...]) -> int:
 
 
 def _likely(chunk: Chunk, job: RegionJob) -> tuple[str, ...]:
-    """Structures to assume in a chunk converted from the old format (it has no references)."""
-    if not chunk.legacy or chunk.structures:
+    """Structures to assume in a chunk without references for them: one converted from the old
+    format, or any chunk of a world converted from a console."""
+    if not (chunk.legacy or job.converted):
         return ()
     near = any(
         max(abs(chunk.x - x), abs(chunk.z - z)) <= STRONGHOLD_REACH for x, z in job.strongholds
@@ -128,6 +129,9 @@ class RegionJob:
     no structure references (see `structure_blocks.LIKELY`)."""
     strongholds: tuple[tuple[int, int], ...] = ()
     """Start chunks of the strongholds, as far as the world's data files tell."""
+    converted: bool = False
+    """The world was converted from a console: even once Java has finished its chunks, they
+    carry no references for the structures the console generated."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -135,14 +135,19 @@ def test_converted_chunks_assume_the_structures_of_their_dimension():
     own blocks are assumed generated, other building blocks still count."""
     blocks = {(5, 61, 5): "minecraft:nether_bricks", (6, 61, 6): "minecraft:oak_planks"}
 
-    def scan(*, legacy: bool, likely: tuple[str, ...] = (), strongholds=()) -> RegionScan:
+    def scan(
+        *, legacy: bool, likely: tuple[str, ...] = (), strongholds=(), converted: bool = False
+    ) -> RegionScan:
         raw = chunk_nbt(0, 0, blocks, fill=GROUND, inhabited=VISITED)
         if legacy:
             raw["TerrainPopulated"] = Byte(1)
         data = region({(0, 0): (raw, 1_693_591_200)})
-        return scan_region(RegionJob("r.0.0.mca", 0, 0, data, likely, strongholds))
+        return scan_region(RegionJob("r.0.0.mca", 0, 0, data, likely, strongholds, converted))
 
     assert scan(legacy=True, likely=("likely_fortress",)).blocks == {"minecraft:oak_planks": 1}
+    # Once Java has finished the chunks, a converted world still has no such references.
+    finished = scan(legacy=False, likely=("likely_fortress",), converted=True)
+    assert finished.blocks == {"minecraft:oak_planks": 1}
     # Without the assumption, or in a chunk saved by Java itself, both count.
     assert len(scan(legacy=True).blocks) == 2
     assert len(scan(legacy=False, likely=("likely_fortress",)).blocks) == 2

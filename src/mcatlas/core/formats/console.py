@@ -235,6 +235,7 @@ def parse_console(
         chunk_times=parse_chunk_times(chunk_times) if chunk_times else {},
         tool=_str(conversion, "tool"),
         converted_at=_moment(_str(conversion, "converted_at_utc")),
+        finalized=bool(_obj(conversion, "finalized")),
         notes=_strings(conversion, "notes"),
         problems=_problems(_strings(conversion, "errors")),
     )

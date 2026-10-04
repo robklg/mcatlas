@@ -90,6 +90,8 @@ class ConsoleFacts(Facts):
     """Per dimension: (chunk x, chunk z, last saved as Unix time; 0 when undated)."""
     tool: str | None = None
     converted_at: datetime | None = None
+    finalized: bool = False
+    """The converter had Minecraft load and save every chunk once: finished and lit."""
     notes: list[str] = Field(default_factory=list[str])
     problems: list[str] = Field(default_factory=list[str])
     """Conversion errors (e.g. a sign whose text could not be converted)."""

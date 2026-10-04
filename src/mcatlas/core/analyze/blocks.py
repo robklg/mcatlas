@@ -108,6 +108,7 @@ def _scan_files(
     *,
     likely: tuple[str, ...] = (),
     strongholds: tuple[tuple[int, int], ...] = (),
+    converted: bool = False,
 ) -> list[RegionScan]:
     regions: list[tuple[str, int, int, int]] = []
     for f in region_files:
@@ -122,7 +123,7 @@ def _scan_files(
             if isinstance(blob, OSError):
                 errors.append(f"{rel}: {blob}")
             else:
-                jobs.append(RegionJob(rel, rx, rz, blob, likely, strongholds))
+                jobs.append(RegionJob(rel, rx, rz, blob, likely, strongholds, converted))
         for scan in mapper(scanner, jobs):
             errors.extend(scan.errors)
             scans.append(scan)
@@ -137,11 +138,19 @@ def _dimension(
     texts: list[TextEntry],
     *,
     strongholds: tuple[tuple[int, int], ...],
+    converted: bool,
 ) -> DimensionBlocks:
     likely = LIKELY_BY_DIMENSION.get(dim.key, ())
     held = strongholds if dim.key == OVERWORLD else ()
     scans = _scan_files(
-        files, dim.region_files, scan_region, mapper, errors, likely=likely, strongholds=held
+        files,
+        dim.region_files,
+        scan_region,
+        mapper,
+        errors,
+        likely=likely,
+        strongholds=held,
+        converted=converted,
     )
     entity_scans = _scan_files(files, dim.entity_files, scan_entities, mapper, errors)
     for scan in (*scans, *entity_scans):
@@ -198,7 +207,15 @@ def analyze_blocks(files: WorldFiles, layout: WorldLayout, mapper: Mapper) -> Bl
     texts: list[TextEntry] = []
     strongholds = _strongholds(files, errors)
     dims = [
-        _dimension(files, d, mapper, errors, texts, strongholds=strongholds)
+        _dimension(
+            files,
+            d,
+            mapper,
+            errors,
+            texts,
+            strongholds=strongholds,
+            converted=layout.console_metadata is not None,
+        )
         for d in layout.dimensions
     ]
     texts.extend(_player_texts(files, layout, errors))

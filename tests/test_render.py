@@ -17,7 +17,7 @@ from mcatlas.adapters.bluemap import (
 )
 from mcatlas.adapters.serve import serve
 from mcatlas.core.build import BuildSite, BuildSummary
-from mcatlas.core.catalog import WorldEntry
+from mcatlas.core.catalog import Origin, WorldEntry
 from mcatlas.core.model import (
     NETHER,
     OVERWORLD,
@@ -148,6 +148,15 @@ def test_plans_cover_sites_per_dimension_and_copy_only_needed_regions():
     assert nether.name == "Lab (Nether)" and nether.region_files == ["DIM-1/region/r.0.0.mca"]
     assert nether.areas[0].max_y == 120 and nether.areas[0].y == 120  # below the roof
     assert over.sorting < nether.sorting
+
+
+def test_converted_worlds_render_without_light_data_until_finished():
+    """Chunks of a converted world have no light data until Minecraft loads them once."""
+    sites = [_site(OVERWORLD, (0, 0, 31, 31))]
+    assert not _plan(_entry(sites))[0].unlit
+    assert _plan(_entry(sites, origin=Origin(console="Nintendo Wii U")))[0].unlit
+    finished = Origin(console="Nintendo Wii U", finalized=True)
+    assert not _plan(_entry(sites, origin=finished))[0].unlit
 
 
 def test_worlds_without_sites_show_their_spawn_and_old_worlds_nothing():

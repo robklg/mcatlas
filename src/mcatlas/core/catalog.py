@@ -115,6 +115,8 @@ class Origin(Facts):
     converted_at: datetime | None = None
     bundled_map: bool = False
     """Started from a map that came with the game: its play time is not (only) ours."""
+    finalized: bool = False
+    """Its chunks were loaded and saved once by Minecraft: finished, lit."""
     notes: list[str] = Field(default_factory=list[str])
 
 
@@ -133,6 +135,7 @@ def _origin(console: ConsoleFacts, tz: tzinfo) -> Origin:
         tool=console.tool,
         converted_at=console.converted_at,
         bundled_map=console.bundled_map,
+        finalized=console.finalized,
         notes=console.notes,
     )
 

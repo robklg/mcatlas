@@ -74,7 +74,7 @@ MAPS = Analyzer("maps", 3, 1, MapFacts, _simple(analyze_maps))
 """In-game maps; their images are stored as assets named `maps/<image>`."""
 BLOCKS = Analyzer(
     "blocks",
-    BLOCK_LISTS_VERSION * 100 + 4,
+    BLOCK_LISTS_VERSION * 100 + 5,
     2,
     BlockFacts,
     analyze_blocks,
@@ -84,7 +84,7 @@ BLOCKS = Analyzer(
 
 CONSOLE = Analyzer(
     "console",
-    3,
+    4,
     1,
     ConsoleFacts,
     _simple(analyze_console),
