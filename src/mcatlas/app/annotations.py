@@ -3,12 +3,24 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mcatlas.core.annotations import Annotation
 from mcatlas.core.catalog import WorldEntry
+from mcatlas.core.model import WorldId
 from mcatlas.ports import AnnotationStore, SiteWriter
+
+
+class NoteSubject(Protocol):
+    """All a note needs of its world, so a stored world will do and no catalog is built."""
+
+    @property
+    def world_id(self) -> WorldId: ...
+
+    @property
+    def relpath(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +39,7 @@ class NoteChange:
 
 
 def apply_change(
-    current: Annotation | None, entry: WorldEntry, change: NoteChange, now: datetime
+    current: Annotation | None, entry: NoteSubject, change: NoteChange, now: datetime
 ) -> Annotation:
     base = current or Annotation(world=entry.world_id)
     note = base.note if change.note is None else change.note
@@ -51,7 +63,7 @@ def apply_change(
 
 def save_note(
     notes: AnnotationStore,
-    entry: WorldEntry,
+    entry: NoteSubject,
     change: NoteChange,
     now: datetime,
     site: SiteWriter | None = None,

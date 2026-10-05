@@ -1075,6 +1075,141 @@
     ];
   }
 
+  // ---------- play on a server (optional; mcatlas only calls an API on the same origin) ----------
+  // One world can be open at a time. The API does the work and reports progress; we poll it.
+  const PLAY = window.MCATLAS_PLAY || null;
+  let playApi = false;
+  let playStatus = null;
+  let playBox = null;
+  let playWorld = null;
+  let playTimer = null;
+  let playMessage = "";
+  const playSites = new Map();  // chosen start site per world, kept while the status refreshes
+  const playBusy = () => Boolean(playStatus && (playStatus.state === "opening" || playStatus.state === "closing"));
+
+  async function fetchPlayStatus() {
+    const r = await fetch(`${PLAY.endpoint}/status`, { headers: { "X-Mcatlas": "1" }, cache: "no-store" });
+    const data = r.ok ? await r.json() : null;
+    return data && typeof data.state === "string" ? data : null;
+  }
+  async function checkPlayApi() {
+    if (!PLAY || !PLAY.endpoint || !SERVED) return;
+    try { playStatus = await fetchPlayStatus(); } catch { playStatus = null; }
+    playApi = playStatus !== null;
+    if (playApi && $("#detail").open && openWorld) openDetail(openWorld);
+  }
+  function schedulePlay() {
+    clearTimeout(playTimer);
+    if (!playApi || !playBox || !$("#detail").open) return;
+    playTimer = setTimeout(refreshPlay, playBusy() ? 2000 : 10000);
+  }
+  async function refreshPlay() {
+    try { playStatus = (await fetchPlayStatus()) || playStatus; } catch { /* keep the last status */ }
+    if (playBox && playWorld) fillPlayBox(playWorld);
+    schedulePlay();
+  }
+
+  // Why the server can't load a world, or null. The server checks again; this only hides the button.
+  function playRefusal(w) {
+    if (w.format !== "anvil") return t("play_no_format");
+    // Not "modded" (WasModded): servers and many downloaded maps set that too. Mod blocks it is.
+    if (w.build && w.build.modded) return t("play_no_modded");
+    if (PLAY.max_data_version && w.data_version && w.data_version > PLAY.max_data_version) {
+      return t("play_no_newer", { version: w.version_name || String(w.data_version) });
+    }
+    return null;
+  }
+  // Only the overworld is loaded, at a build site that has a 3D map (the server reads those).
+  function playStarts(w) {
+    const sites = new Set();
+    for (const m of rendersOf(w)) {
+      if (m.dimension !== "minecraft:overworld") continue;
+      for (const a of m.areas) if (a.site !== null && a.site !== undefined) sites.add(a.site);
+    }
+    return [...sites].sort((a, b) => a - b);
+  }
+
+  async function playAction(path, w) {
+    const st = playStatus;
+    const occupied = st && st.state === "ready" && st.players && st.players.length;
+    if (occupied && !confirm(t("play_confirm", { name: st.name || st.world_id, list: st.players.join(", ") }))) return;
+    playMessage = "";
+    try {
+      const r = await fetch(`${PLAY.endpoint}/${path}`, { method: "POST", headers: { "X-Mcatlas": "1" } });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 409) playMessage = t("play_busy");
+      else if (!r.ok) playMessage = t("play_refused", { msg: data.message || data.error || r.statusText });
+      if (data && typeof data.state === "string") playStatus = data;
+    } catch (e) {
+      playMessage = t("play_refused", { msg: e.message });
+    }
+    if (playBox && playWorld === w) fillPlayBox(w);
+    schedulePlay();
+  }
+
+  function fillPlayBox(w) {
+    const st = playStatus || { state: "idle" };
+    const busy = playBusy();
+    const refusal = playRefusal(w);
+    const openHere = st.state === "ready" && st.world_id === w.world_id;
+    const asked = st.requested && st.requested.world_id === w.world_id;
+    const parts = [h("div", { class: "note-head" }, h("b", null, t("play_h")))];
+    if (openHere) {
+      const server = PLAY.server_name || t("play_the_server");
+      parts.push(h("div", null, t("play_open_this", { server }), " ", h("code", null, st.join), " ", copyButton(st.join)));
+      if (st.leave) parts.push(h("div", { class: "folder" }, t("play_leave", { cmd: st.leave })));
+    } else if (st.state === "ready" && st.world_id) {
+      parts.push(h("div", { class: "folder" }, t("play_open_other", { name: st.name || st.world_id })));
+    } else if (busy) {
+      const what = asked || !st.requested ? t(st.state === "closing" ? "play_closing" : "play_opening") : t("play_busy_other");
+      parts.push(h("div", null, what, st.step ? `: ${st.step}` : "…"));
+    } else if (st.state === "error" && (asked || !st.requested)) {
+      parts.push(h("div", { class: "errors" }, t("play_error", { msg: st.message || "?" })));
+    }
+    if (st.state === "ready" && st.players && st.players.length) {
+      parts.push(h("div", { class: "folder" }, t("play_players", { list: st.players.join(", ") })));
+    }
+    if (st.log && st.log.length && (busy || st.state === "error") && (asked || !st.requested)) {
+      parts.push(h("details", null, h("summary", null, t("play_details")), h("div", { class: "errors" }, st.log.join("\n"))));
+    }
+    const actions = [];
+    if (refusal) {
+      parts.push(h("div", { class: "folder" }, refusal));
+    } else if (!openHere) {
+      const starts = playStarts(w);
+      if (!playSites.has(w.world_id)) playSites.set(w.world_id, starts.length ? String(starts[0]) : "");
+      const choice = playSites.get(w.world_id);
+      actions.push(h("button", { type: "button", class: "primary", disabled: busy, onclick: () => {
+        const site = playSites.get(w.world_id);
+        playAction(`open/${encodeURIComponent(w.world_id)}${site ? `?site=${site}` : ""}`, w);
+      } }, t("play_open")));
+      if (starts.length) {
+        actions.push(h("label", null, `${t("play_at")} `,
+          h("select", { class: "ghost", disabled: busy, onchange: (e) => playSites.set(w.world_id, e.target.value) },
+            starts.map((k) => h("option", { value: String(k), selected: choice === String(k) }, t("site_n", { n: k + 1 }))),
+            h("option", { value: "", selected: choice === "" }, t("spawn")))));
+      }
+    }
+    if (openHere) {
+      actions.push(h("button", { type: "button", class: "ghost", disabled: busy, onclick: () => playAction("close", w) }, t("play_close")));
+    }
+    if (playMessage) actions.push(h("span", { class: "folder" }, playMessage));
+    if (actions.length) parts.push(h("div", { class: "note-actions" }, actions));
+    if (!refusal) parts.push(h("p", { class: "folder" }, t("play_note")));
+    playBox.replaceChildren(...parts);
+  }
+
+  function playSection(w) {
+    clearTimeout(playTimer);
+    if (!playApi) { playBox = null; playWorld = null; return null; }
+    if (playWorld !== w) playMessage = "";
+    playBox = h("section", { class: "note-box play-box" });
+    playWorld = w;
+    fillPlayBox(w);
+    schedulePlay();
+    return playBox;
+  }
+
   let openWorld = null;
   function openDetail(w) {
     openWorld = w;
@@ -1126,6 +1261,7 @@
           badges(w)),
         close),
       noteView(w),
+      playSection(w),
       viewsSection(w),
       h("div", { class: "stats" },
         stat(t("st_days"), daysRange(w)),
@@ -1234,6 +1370,7 @@
   render();
   loadTexts();
   checkNotesApi();
+  checkPlayApi();
   const wanted = params.get("w");
   if (wanted && byId.has(wanted)) openDetail(byId.get(wanted));
 })();

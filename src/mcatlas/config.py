@@ -137,6 +137,28 @@ class ServeSettings(BaseModel):
         return [h.strip().lower() for h in v if h.strip()]
 
 
+class PlaySettings(BaseModel):
+    """A "play" button on the site that opens a world in-game on a Minecraft server.
+
+    mcatlas itself never touches a server: the button calls an HTTP API on the same origin as
+    the site (for example behind the reverse proxy that serves it), which does the work. See
+    the README for the API. Off unless `endpoint` is set; the button only shows when that API
+    answers, so the same site also works without it.
+    """
+
+    endpoint: str = ""
+    """Base path of the API, e.g. "/api/play"; empty = no button."""
+    max_data_version: int | None = Field(default=None, ge=1)
+    """The server's Minecraft DataVersion: newer worlds get no button (it can't load them)."""
+    server_name: str = ""
+    """How the site names the server in "go to <server_name> and type /warp ..."."""
+
+    @field_validator("endpoint")
+    @classmethod
+    def _path(cls, v: str) -> str:
+        return v.strip().rstrip("/")
+
+
 class RenderSettings(BaseModel):
     """3D maps with BlueMap (https://bluemap.bluecolored.de), run as a separate Java program.
 
@@ -195,6 +217,7 @@ class Settings(BaseSettings):
     analysis: AnalysisSettings = Field(default_factory=AnalysisSettings)
     render: RenderSettings = Field(default_factory=RenderSettings)
     serve: ServeSettings = Field(default_factory=ServeSettings)
+    play: PlaySettings = Field(default_factory=PlaySettings)
 
     @model_validator(mode="after")
     def _no_overlap(self) -> Self:

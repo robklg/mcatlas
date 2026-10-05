@@ -24,7 +24,7 @@ from mcatlas.adapters.atlas_fs import AtlasFolderWriter
 from mcatlas.adapters.bluemap import BlueMapRenderer, RenderError
 from mcatlas.adapters.outputs import atomic_write
 from mcatlas.adapters.serve import serve as make_server
-from mcatlas.adapters.site_static import StaticSiteWriter
+from mcatlas.adapters.site_static import PlayButton, StaticSiteWriter
 from mcatlas.adapters.source_folder import FolderSource
 from mcatlas.adapters.store_sqlite import SqliteFactStore
 from mcatlas.adapters.usercache import load_names
@@ -100,6 +100,16 @@ def _sources(settings: Settings) -> list[FolderSource]:
 
 def _store(settings: Settings) -> SqliteFactStore:
     return SqliteFactStore(settings.paths.state_dir / "mcatlas.sqlite")
+
+
+def _site_writer(settings: Settings) -> StaticSiteWriter:
+    play = settings.play
+    button = (
+        PlayButton(play.endpoint, play.max_data_version, play.server_name)
+        if play.endpoint
+        else None
+    )
+    return StaticSiteWriter(settings.paths.site_dir, language=settings.language, play=button)
 
 
 def _names(settings: Settings) -> dict[str, str]:
@@ -443,7 +453,7 @@ def build_site(
     try:
         catalog, location, problems = publish_site(
             store,
-            StaticSiteWriter(settings.paths.site_dir, language=settings.language),
+            _site_writer(settings),
             _names(settings),
             settings.analysis.zone(),
             ignore_file_days=settings.analysis.ignore_file_days,
@@ -479,15 +489,22 @@ def serve(
     """Serve the generated site on http://HOST:PORT; notes can be edited on the site."""
     settings = _settings()
     notes = _notes(settings)
-    by_id = {e.world_id: e for e in _load(settings).worlds}
-    site = StaticSiteWriter(settings.paths.site_dir, language=settings.language)
+    site = _site_writer(settings)
 
     def on_note(world_id: str, payload: Mapping[str, object]) -> Mapping[str, object]:
-        entry = by_id[WorldId(world_id)]
+        # Looked up per note rather than building the catalog at startup: that costs
+        # hundreds of MB on a small server, and a fresh fact store needs no restart.
+        store = _store(settings)
+        try:
+            world = store.world(WorldId(world_id))
+        finally:
+            store.close()
+        if world is None:
+            raise KeyError(world_id)
         annotation, where = save_note(
-            notes, entry, change_from_form(payload), datetime.now().astimezone(), site
+            notes, world, change_from_form(payload), datetime.now().astimezone(), site
         )
-        console.print(f"note saved: {entry.folder_name} → {where}", highlight=False)
+        console.print(f"note saved: {world.folder_name} → {where}", highlight=False)
         return {"annotation": annotation.model_dump(mode="json"), "stored": where}
 
     can_write = settings.paths.annotations() is not None
@@ -575,7 +592,7 @@ def render(
         try:
             _, location, _ = publish_site(
                 store,
-                StaticSiteWriter(settings.paths.site_dir, language=settings.language),
+                _site_writer(settings),
                 _names(settings),
                 settings.analysis.zone(),
                 ignore_file_days=settings.analysis.ignore_file_days,
@@ -762,7 +779,7 @@ def note(
             entry,
             change,
             datetime.now().astimezone(),
-            StaticSiteWriter(settings.paths.site_dir, language=settings.language),
+            _site_writer(settings),
         )
     except (AnnotationStoreError, ValueError) as e:
         err.print(f"[red]{e}[/]")

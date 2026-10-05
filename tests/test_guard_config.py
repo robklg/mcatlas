@@ -120,11 +120,14 @@ state_dir = "{tmp_path / "state"}"
 site_dir = "{tmp_path / "site"}"
 [serve]
 allowed_hosts = [" Atlas.Example.org ", ""]
+[play]
+endpoint = " /api/play/ "
 """,
     )
     settings, _ = load_settings(cfg)
     assert not settings.sources[0].path.exists()
     assert settings.serve.allowed_hosts == ["atlas.example.org"]
+    assert settings.play.endpoint == "/api/play" and settings.play.max_data_version is None
     guard.protect(s.path for s in settings.sources)  # as the CLI does; must not need the folder
 
 

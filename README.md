@@ -207,6 +207,32 @@ proxy: anyone who reaches the server can read the site and write notes.
 After adding or editing notes, run `mcatlas export-atlas` again so the atlas pages quote them
 too (the notes themselves are already durable where they are).
 
+`serve` keeps little in memory (about 70 MB): it looks a world up in the fact store when a
+note is saved, so it doesn't need a restart after you publish a fresh store either.
+
+### Play on a server
+
+With a Minecraft server next to the site, the world page can get a button that opens the
+world in-game there, to walk around in it again. mcatlas does not do that itself, and never
+touches a server: set `endpoint` under `[play]` and the button calls an HTTP API on the same
+origin as the site (served by your own tooling behind the same proxy and login), only showing
+when that API answers. Every call carries the header `X-Mcatlas: 1`.
+
+```
+GET  <endpoint>/status                     → the status below
+POST <endpoint>/open/<world id>[?site=<n>] → 202 + status, then the site polls; 409 if busy
+POST <endpoint>/close                      → 202 + status, then the site polls; 409 if busy
+```
+
+`site` is a build site number as in the 3D maps' `areas[].site`, offered only for overworld
+sites with a 3D map; without it the world's own spawn is used. The status is
+`{"state": "idle|opening|ready|closing|error", "step": "...", "message": "...", "log": [...],
+"requested": {"world_id": "..."}, "world_id": "...", "name": "...", "join": "/warp ...",
+"leave": "/spawn", "players": [...]}`; `join` (and `leave`, if given) are shown when a world
+is open, and the site asks before replacing or closing a world that has `players` in it.
+Worlds the server can't load get no button: not in the Anvil format, with blocks from mods, or
+newer than `max_data_version`.
+
 ## What it measures (tier 1)
 
 | Signal | Source | Notes |

@@ -72,6 +72,10 @@ class FactStore(Protocol):
 
     def worlds(self) -> Sequence[StoredWorld]: ...
 
+    def world(self, world_id: WorldId) -> StoredWorld | None:
+        """One world's identity, without its facts: cheap enough to look up per request."""
+        ...
+
 
 class SiteWriter(Protocol):
     def write(

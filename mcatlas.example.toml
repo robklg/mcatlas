@@ -49,6 +49,14 @@ jobs = 8                        # worlds analyzed in parallel
 # Host header the browser sends (exactly, so with a port only if the URL has one).
 # allowed_hosts = ["atlas.example.org"]
 
+[play]
+# A button on the site that opens a world in-game on your Minecraft server, through an API on
+# the same origin as the site (see "Play on a server" in the README). Off while empty; the
+# button only shows when the API answers.
+# endpoint = "/api/play"
+# max_data_version = 4903   # the server's DataVersion (4903 = 26.2): newer worlds get no button
+# server_name = "our server"
+
 [render]
 # BlueMap CLI (https://github.com/BlueMap-Minecraft/BlueMap/releases) and Java 25 to run it.
 # java = "~/Library/Application Support/minecraft/runtime/java-runtime-epsilon/mac-os-arm64/java-runtime-epsilon/jre.bundle/Contents/Home/bin/java"

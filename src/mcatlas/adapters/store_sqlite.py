@@ -171,6 +171,25 @@ class SqliteFactStore:
             )
         return found
 
+    def world(self, world_id: WorldId) -> StoredWorld | None:
+        rows = self._rows(
+            "SELECT world_id, source_id, relpath, folder_name, format, fingerprint, total_size "
+            "FROM worlds WHERE world_id = ?",
+            (world_id,),
+        )
+        if not rows:
+            return None
+        wid, source_id, relpath, folder, fmt, fingerprint, size = rows[0]
+        return StoredWorld(
+            world_id=WorldId(str(wid)),
+            source_id=str(source_id),
+            relpath=str(relpath),
+            folder_name=str(folder),
+            format=WorldFormat(str(fmt)),
+            fingerprint=str(fingerprint),
+            total_size=int(cast("int", size)),
+        )
+
     def worlds(self) -> Sequence[StoredWorld]:
         facts: dict[str, dict[str, str]] = {}
         errors: dict[str, dict[str, str]] = {}

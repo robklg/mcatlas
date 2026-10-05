@@ -8,6 +8,7 @@ books, names) go to `data/texts.js`, loaded after the page so that search can us
 
 import json
 from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Final
@@ -39,10 +40,22 @@ def _script(assignment: str, payload: str) -> bytes:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PlayButton:
+    """Where the site's "play on the server" button sends its requests (see PlaySettings)."""
+
+    endpoint: str
+    max_data_version: int | None = None
+    server_name: str = ""
+
+
 class StaticSiteWriter:
-    def __init__(self, site_dir: Path, *, language: Language = "en") -> None:
+    def __init__(
+        self, site_dir: Path, *, language: Language = "en", play: PlayButton | None = None
+    ) -> None:
         self._dir = site_dir
         self._language: Language = language
+        self._play = play
 
     def write(
         self,
@@ -64,8 +77,10 @@ class StaticSiteWriter:
             }
         )
         # The default language; visitors can switch on the site (their choice is remembered).
-        default = f"window.MCATLAS_LANG = {json.dumps(self._language)};\n".encode()
-        _write(self._dir / "data" / "catalog.js", default + _script("MCATLAS_CATALOG = ", payload))
+        default = f"window.MCATLAS_LANG = {json.dumps(self._language)};\n"
+        play = json.dumps(asdict(self._play) if self._play is not None else None)
+        settings = f"{default}window.MCATLAS_PLAY = {play};\n".encode()
+        _write(self._dir / "data" / "catalog.js", settings + _script("MCATLAS_CATALOG = ", payload))
         for world_id, build_map in catalog.maps.items():
             key = json.dumps(world_id)
             _write(

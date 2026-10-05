@@ -28,7 +28,7 @@ from builders import (
 from mcatlas.adapters import guard, manifest
 from mcatlas.adapters.atlas_fs import AtlasFolderWriter
 from mcatlas.adapters.bluemap import BlueMapRenderer
-from mcatlas.adapters.site_static import StaticSiteWriter
+from mcatlas.adapters.site_static import PlayButton, StaticSiteWriter
 from mcatlas.adapters.source_folder import FolderSource
 from mcatlas.adapters.store_sqlite import SqliteFactStore
 from mcatlas.adapters.workers import process_mapper
@@ -339,7 +339,11 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
         again = render_worlds([source], catalog.worlds, renderer, RenderOptions())
         dutch = render_worlds([source], catalog.worlds, renderer, RenderOptions(language="nl"))
         catalog, index, _ = publish_site(
-            store, StaticSiteWriter(out / "site"), names, UTC, renderer=renderer
+            store,
+            StaticSiteWriter(out / "site", play=PlayButton("/api/play", 4903)),
+            names,
+            UTC,
+            renderer=renderer,
         )
         atlas = AtlasFolderWriter(out / "atlas", notes_dir=out / "atlas" / "annotations")
         exported = export_atlas(
@@ -351,6 +355,9 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
             tool="mcatlas test",
             renderer=renderer,
         )
+        # What `serve` looks up per note, instead of building the catalog.
+        looked_up = {w.world_id: store.world(w.world_id) for w in catalog.worlds}
+        unknown = store.world(WorldId("no-such-world-000000"))
     finally:
         store.close()
 
@@ -368,12 +375,20 @@ def test_full_pipeline_leaves_source_untouched(archive: Path, tmp_path: Path):
     assert seen and all(str(out / "render" / "worlds") in line for line in seen)
     assert not any(str(archive) in line for line in seen)
 
+    assert unknown is None
+    for entry in catalog.worlds:
+        stored = looked_up[entry.world_id]
+        assert stored is not None and not stored.facts
+        assert (stored.relpath, stored.folder_name) == (entry.relpath, entry.folder_name)
+
     # Incremental: the second run found everything up to date.
     assert first.analyzed == first.worlds and not first.failures
     assert second.analyzed == 0 and second.up_to_date == second.worlds
 
     # Output landed only where it was asked to.
     assert Path(index).is_file() and (out / "site" / "data" / "catalog.js").is_file()
+    play = '{"endpoint": "/api/play", "max_data_version": 4903, "server_name": ""}'
+    assert f"window.MCATLAS_PLAY = {play};" in (out / "site" / "data" / "catalog.js").read_text()
     by_folder = {w.folder_name: w for w in catalog.worlds}
     assert set(by_folder) == {
         "Alex en Sam's droom wereld",

@@ -11,7 +11,13 @@ from hypothesis import strategies as st
 from mcatlas.adapters import guard
 from mcatlas.adapters.annotations_md import AnnotationStoreError, MarkdownAnnotations
 from mcatlas.adapters.serve import serve
-from mcatlas.app.annotations import NoteChange, apply_change, change_from_form, find_world
+from mcatlas.app.annotations import (
+    NoteChange,
+    apply_change,
+    change_from_form,
+    find_world,
+    save_note,
+)
 from mcatlas.config import PathSettings
 from mcatlas.core.annotations import (
     Annotation,
@@ -19,7 +25,7 @@ from mcatlas.core.annotations import (
     format_annotation,
     parse_annotation,
 )
-from mcatlas.core.catalog import WorldEntry
+from mcatlas.core.catalog import StoredWorld, WorldEntry
 from mcatlas.core.model import WorldFormat, WorldId
 
 WORLD = WorldId("trein-statjon-faa7dc")
@@ -140,6 +146,24 @@ def test_apply_change_merges_and_replaces():
     assert (fourth.title, fourth.note, fourth.tags, fourth.rating) == ("", "nieuw", [], None)
     with pytest.raises(ValueError, match="extra"):
         change_from_form({"note": "x", "world": "other"})
+
+
+def test_save_note_needs_only_the_stored_world(tmp_path: Path):
+    """`serve` saves notes against the fact store's row for a world, not a catalog entry."""
+    notes = MarkdownAnnotations(tmp_path / "annotations")
+    world = StoredWorld(
+        world_id=WORLD,
+        source_id="archive",
+        relpath="treinen/trein statjon",
+        folder_name="trein statjon",
+        format=WorldFormat.ANVIL,
+        fingerprint="f",
+        total_size=1,
+    )
+    saved, _ = save_note(notes, world, NoteChange(note="gevonden"), NOW)
+    stored, problems = notes.load()
+    assert not problems and stored[WORLD] == saved
+    assert (saved.folder, saved.note) == ("treinen/trein statjon", "gevonden")
 
 
 def test_find_world_prefers_exact_matches():
